@@ -1,10 +1,10 @@
 import os
 
-import torch
-
 from utils.logger import DataLog
 from utils.hydra_utils import parse_sim_params, parse_task, set_np_formatting, set_seed, get_args
 from model.process_sarl import process_sarl
+
+import torch  # must come after the isaacgym-importing modules above
 
 
 def rollout_record():
