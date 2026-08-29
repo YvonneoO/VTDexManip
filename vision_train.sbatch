@@ -39,6 +39,10 @@ export HF_HOME="${YQQ}/.cache/huggingface"
 export TORCH_HOME="${YQQ}/.cache/torch"
 export PYTHONUNBUFFERED=1
 
+VTDEX_ENV="${YQQ}/envs/vtdexmanip"
+export PATH="${VTDEX_ENV}/bin:${PATH}"
+export LD_LIBRARY_PATH="${VTDEX_ENV}/lib:${LD_LIBRARY_PATH:-}"
+
 SEED="${SEED:-111}"
 
 echo "HOST=$(hostname)"
@@ -49,7 +53,7 @@ echo "SEED=${SEED}"
 
 cd "${VTDEX_ROOT}"
 
-"${YQQ}/envs/vtdexmanip/bin/python" train_agent.py \
+"${VTDEX_ENV}/bin/python" train_agent.py \
   --task "${TASK_NAME}-${MODEL_NAME}" \
   --rl_device cuda:0 \
   --seed "${SEED}" \
