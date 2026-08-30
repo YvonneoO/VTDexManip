@@ -19,7 +19,10 @@
 #
 # Required (--export=ALL,...): TASK_NAME (e.g. bottle_cap), MODEL_NAME (e.g.
 #   base, vt_all_cls, t_scr)
-# Optional: SEED (default 111, matching the README's own examples)
+# Optional: SEED (default 111, matching the README's own examples), RESUME_MODEL
+#   (full path to a model_<iter>.pt -- resumes iteration counting from the
+#   filename, per PPO.load(); vt_all_cls runs are ~7x slower/step than base and
+#   can outrun a single --time budget, this is the resume path for that)
 
 set -euo pipefail
 
@@ -53,10 +56,15 @@ echo "SEED=${SEED}"
 
 cd "${VTDEX_ROOT}"
 
+EXTRA_ARGS=()
+[[ -n "${RESUME_MODEL:-}" ]] && EXTRA_ARGS+=("--resume_model=${RESUME_MODEL}")
+echo "RESUME_MODEL=${RESUME_MODEL:-<none, fresh start>}"
+
 "${VTDEX_ENV}/bin/python" train_agent.py \
   --task "${TASK_NAME}-${MODEL_NAME}" \
   --rl_device cuda:0 \
   --seed "${SEED}" \
-  --headless
+  --headless \
+  "${EXTRA_ARGS[@]}"
 
 echo "---TRAINING DONE: ${TASK_NAME}-${MODEL_NAME} seed${SEED}---"
