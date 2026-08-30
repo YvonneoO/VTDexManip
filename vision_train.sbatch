@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=64G
-#SBATCH --time=06:00:00
+#SBATCH --time=24:00:00
 #SBATCH --output=/scratch/project/prj-02-phai-lab/yqq/logs/vtdex_train_%j.out
 #SBATCH --error=/scratch/project/prj-02-phai-lab/yqq/logs/vtdex_train_%j.err
 #
@@ -16,6 +16,15 @@
 # per the upstream README (e.g. bottle_cap-vt_all_cls, bottle_cap-base,
 # bottle_cap-t_scr). Checkpoints land under runs/<TaskCapitalized>/<task>/
 # <task>-<model>/seed<seed>/checkpoint/.
+#
+# Walltime default is 24h (bumped 2026-08-30 from 6h): `base` models finish a
+# full 2500-iter run in ~1h, but `vt_all_cls` (runs the full pretrained
+# vision+tactile encoder every step, ~7x slower/step) timed out at 6h having
+# reached only 1200-1800/2500 iters on 3 separate launches (bottle_cap, slide,
+# reorient_up, all 2026-08-29). A timed-out job's walltime can't be extended
+# and produces no final checkpoint at the target iteration count, so default
+# generous rather than tuning per model_name -- override with
+# `sbatch --time=HH:MM:SS` for a known-fast case (e.g. base only).
 #
 # Required (--export=ALL,...): TASK_NAME (e.g. bottle_cap), MODEL_NAME (e.g.
 #   base, vt_all_cls, t_scr)
