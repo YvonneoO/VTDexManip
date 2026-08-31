@@ -36,9 +36,16 @@ def rollout_record():
 
     logger.log_kv('model', f'{os.path.basename(args.resume_model)[:-3]}')
     sarl = process_sarl(args, env, args.models, args.logger_dir)
-    # max_trajs=1 -> per-env break threshold is low so the job exits promptly once
-    # the one video segment (max_episode_length frames) has been written.
-    sarl.eval(logger, max_trajs=1, record_video=True)
+    # Video recording needs a fixed max_episode_length STEPS regardless of how
+    # many episodes complete in that window -- eval()'s only loop-exit is a
+    # trajectory-COUNT threshold (num_envs * max_trajs), unrelated to whether
+    # the video buffer has filled yet. max_trajs=1 (10 total for num_envs=10)
+    # broke when episodes reset fast enough to hit that count before
+    # max_episode_length steps passed -- the run exited with NO video ever
+    # written (caught 2026-08-30, seed444: job completed, zero files in
+    # runs/.../videos/). max_trajs=30 gives enough headroom that the count
+    # threshold can't fire before the video segment completes.
+    sarl.eval(logger, max_trajs=30, record_video=True)
 
     print(args.logger_dir)
 
