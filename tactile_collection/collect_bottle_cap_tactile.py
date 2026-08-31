@@ -169,7 +169,12 @@ def main():
             contacts = task.gym.get_env_rigid_contacts(env_ptr)
             pressure_pa, force_grid_n, diag = mappers[i].project(contacts)
             buf = bufs[i]
-            buf["rgb_frames"].append((task.img_buf[i].detach().cpu().numpy() * 255.0).clip(0, 255))
+            # task.img_buf is already in [0,255] raw pixel range -- compute_pixel_obs()'s
+            # own "/ 255." normalization is commented out in shadow_hand.py. Multiplying
+            # by 255 again here (an earlier version of this line did) blew every value
+            # past 255 and clipped to solid white -- caught 2026-08-30 via the uploaded
+            # smoke-test check videos (RGB panel was blank white, tactile panel was fine).
+            buf["rgb_frames"].append(task.img_buf[i].detach().cpu().numpy().clip(0, 255))
             buf["pressure_grid"].append(pressure_pa)
             buf["force_grid_n"].append(force_grid_n)
             buf["source_force_n"].append(diag["source_force_n"])
