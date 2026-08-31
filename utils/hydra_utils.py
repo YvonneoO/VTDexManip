@@ -460,8 +460,11 @@ def get_args():
     elif args.task.split("-")[-1] == "t_scr_gt":
         # PPO P+GT-Tac arm: same P+tactile architecture as t_scr (ActorCriticT,
         # plain mlp encoder, 20 force-sensor dims), but obs_type="TacGT" returns
-        # continuous per-link force magnitude instead of t_scr's binarized signal
-        # -- only implemented for bottle_cap's compute_observations() so far.
+        # continuous per-link force magnitude instead of t_scr's binarized signal.
+        # Implemented for bottle_cap, reorient_up, and slide's own
+        # compute_observations()/compute_sensor_obs() overrides (each task
+        # subclasses these, so each needed its own TacGT branch + gt_continuous
+        # param -- not shared via the base ShadowHandBase class).
         args.models["encoder"]["name"] = "mlp"
         args.models["policy"]["actor_critic"] = "ActorCriticT"
         args.models["learn"]["nminibatches"] = 4

@@ -489,10 +489,21 @@ class Sliding(ShadowHandBase):
         elif self.obs_type == 'Base':
             self.obs_states_buf = base_state
 
-    def compute_sensor_obs(self):
+        elif self.obs_type == 'TacGT':
+            # PPO P+GT-Tac arm: proprioception + continuous per-link force-sensor
+            # magnitude (same 20 sensors as TacOnly, not binarized -- skips the
+            # separate fingertip_force OR-into-binary logic below, which has no
+            # clean continuous analog).
+            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+
+    def compute_sensor_obs(self, gt_continuous=False):
         # forces and torques
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         vec_sensor = torch.norm(contact, p=2, dim=2)
+        if gt_continuous:
+            self.sensor_obs = vec_sensor
+            return self.sensor_obs
         fingertip_force = self.vec_sensor_tensor.view(self.num_envs, 5, 6)[:, :, :3]
         fingertip_force = torch.norm(fingertip_force, p=2, dim=2)
         fingertip_sensor = torch.zeros_like(fingertip_force)
