@@ -64,24 +64,20 @@ env:
 
   vision:
     camera:
-      # relative to table center
+      # relative to table center (height offset = table_dims.z, added by
+      # ShadowHandBase.set_camera -- see _cfg_camera_pose). Original was
+      # eye=[-0.25,0.35,0.5]/lookat=[0.02,-0.02,0.1]: too high/far, includes
+      # the hand-mount pedestals -- pulled in and lowered 2026-08-30 to match
+      # the close arm-end/chest-style framing used for bidexhands data
+      # collection (tight on hand+object, target offset ~0.08 above the
+      # object like the bidexhands BIDEX_CHEST_TARGET_OFFSET convention).
       eye: [
-        [ -0.25, 0.35, 0.5 ],
-#        [ -0.25, 0, 0.5 ], # full occlusion
-#        [0.25, 0.35, 0.5 ],
-        #        [ 0.5, 0.0, 0.05 ],
-        #        [ -0.5, 0.0, 0.05 ],
-        #        [ 0.0, 0.5, 0.05 ],
-        #        [ 0.0, -0.5, 0.05 ]
+        [ -0.13, 0.18, 0.28 ],
+#        [ -0.25, 0.35, 0.5 ], # original, too wide/high
       ]
       lookat: [
-        [ 0.02, -0.02, 0.1 ], # camera cannot look at accurate -z
-#        [ 0.02, 0, 0.1 ], # full occlusion
-#        [ -0.02, -0.02, 0.1 ],
-        #        [ 0.0, 0.0, 0.05 ],
-        #        [ 0.0, 0.0, 0.05 ],
-        #        [ 0.0, 0.0, 0.05 ],
-        #        [ 0.0, 0.0, 0.05 ],
+        [ 0.0, 0.0, 0.08 ],
+#        [ 0.02, -0.02, 0.1 ], # original
       ]
 
   random_load:
@@ -100,6 +96,7 @@ env:
   dofSpeedScale: 20.0
   actionsMovingAverage: 1.0
   controlFrequencyInv: 1 # 60 Hz
+  tactileRefreshInv: 1 # hold tactile obs for N steps (zero-order hold); 1 = refresh every step (baseline)
 
   startPositionNoise: 0.01  # bias range 0.02 represents -2cm~2cm
   startRotationNoise: 0.0
