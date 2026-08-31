@@ -457,6 +457,16 @@ def get_args():
         args.task_envs["env"]["obs_dim"]["tac"] = 20
         args.task_envs["env"]["tac_noise"] = 1.0
 
+    elif args.task.split("-")[-1] == "t_scr_gt":
+        # PPO P+GT-Tac arm: same P+tactile architecture as t_scr (ActorCriticT,
+        # plain mlp encoder, 20 force-sensor dims), but obs_type="TacGT" returns
+        # continuous per-link force magnitude instead of t_scr's binarized signal
+        # -- only implemented for bottle_cap's compute_observations() so far.
+        args.models["encoder"]["name"] = "mlp"
+        args.models["policy"]["actor_critic"] = "ActorCriticT"
+        args.models["learn"]["nminibatches"] = 4
+        args.task_envs["env"]["obs_type"] = "TacGT"
+        args.task_envs["env"]["obs_dim"]["tac"] = 20
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"

@@ -418,6 +418,12 @@ class BottleCap(ShadowHandBase):
         elif self.obs_type == 'Base':
             self.obs_states_buf = base_state
 
+        elif self.obs_type == 'TacGT':
+            # PPO P+GT-Tac arm: proprioception + continuous per-link force-sensor
+            # magnitude (same 20 sensors as TacOnly/t_scr, not binarized).
+            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+
     def reset_idx(self, env_ids, goal_env_ids):
         # randomization can happen only at reset time, since it can reset actor positions on GPU
         if self.randomize:
@@ -615,8 +621,19 @@ class BottleCap(ShadowHandBase):
             vec_sensor = self.add_gaussian_noise(vec_sensor, std=self.tac_noise)
             if self.hysteresis:
                 vec_sensor = self.hysteresis_thresholding(vec_sensor)
-        self.sensor_obs = torch.zeros_like(vec_sensor)
-        self.sensor_obs[vec_sensor > self.tactile_theshold] = 1
+        touched = torch.zeros_like(vec_sensor)
+        touched[vec_sensor > self.tactile_theshold] = 1
+
+        # tactileRefreshInv==1 (default) reproduces the original every-step behavior exactly.
+        # For N>1, hold the last computed reading (zero-order hold) between refreshes to test
+        # PPO's sensitivity to the tactile observation's update rate.
+        if self.tactile_refresh_inv <= 1:
+            self.sensor_obs = touched
+        else:
+            if not hasattr(self, "sensor_obs") or self.sensor_obs is None:
+                self.sensor_obs = touched.clone()
+            refresh_mask = ((self.progress_buf - 1) % self.tactile_refresh_inv == 0).unsqueeze(-1)
+            self.sensor_obs = torch.where(refresh_mask, touched, self.sensor_obs)
         # print(vec_sensor)
         return self.sensor_obs
     def apply_randomizations(self, dr_params):

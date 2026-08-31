@@ -184,6 +184,7 @@ class ShadowHandBase(BaseTask):
 
         self.dt = self.sim_params.dt
         control_freq_inv = self.cfg["env"].get("controlFrequencyInv", 1)
+        self.tactile_refresh_inv = int(self.cfg["env"].get("tactileRefreshInv", 1))
         if self.reset_time > 0.0:
             self.max_episode_length = int(round(self.reset_time/(control_freq_inv * self.dt)))
             print("Reset time: ", self.reset_time)
@@ -828,14 +829,40 @@ class ShadowHandBase(BaseTask):
         pixel_obs = torch.flatten(self.img_buf, start_dim=1, end_dim=-1)
         return pixel_obs
 
-    def compute_sensor_obs(self):
+    def compute_sensor_obs(self, gt_continuous=False):
         # forces and torques
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         # vec_sensor = self.vec_sensor_tensor
         vec_sensor = contact
         vec_sensor = torch.norm(vec_sensor, p=2, dim=2)
-        self.sensor_obs = torch.zeros_like(vec_sensor)
-        self.sensor_obs[vec_sensor > 0.01] = 1
+        if gt_continuous:
+            # PPO P+GT-Tac arm: same per-link force-sensor signal as the native
+            # tactile obs, but the raw continuous force magnitude [N] instead of
+            # binarizing at the 0.01N threshold. Not what VTDexManip's own
+            # t_scr/T-Pretrain models use (they match the paper's own binarized
+            # tactile-pretraining convention) -- this is a deliberate deviation
+            # for testing ground-truth (non-binary) tactile's effect on PPO.
+            if self.tactile_refresh_inv <= 1:
+                self.sensor_obs = vec_sensor
+            else:
+                if not hasattr(self, "sensor_obs") or self.sensor_obs is None:
+                    self.sensor_obs = vec_sensor.clone()
+                refresh_mask = ((self.progress_buf - 1) % self.tactile_refresh_inv == 0).unsqueeze(-1)
+                self.sensor_obs = torch.where(refresh_mask, vec_sensor, self.sensor_obs)
+            return self.sensor_obs
+        touched = torch.zeros_like(vec_sensor)
+        touched[vec_sensor > 0.01] = 1
+
+        # tactileRefreshInv==1 (default) reproduces the original every-step behavior exactly.
+        # For N>1, hold the last computed reading (zero-order hold) between refreshes to test
+        # PPO's sensitivity to the tactile observation's update rate.
+        if self.tactile_refresh_inv <= 1:
+            self.sensor_obs = touched
+        else:
+            if not hasattr(self, "sensor_obs") or self.sensor_obs is None:
+                self.sensor_obs = touched.clone()
+            refresh_mask = ((self.progress_buf - 1) % self.tactile_refresh_inv == 0).unsqueeze(-1)
+            self.sensor_obs = torch.where(refresh_mask, touched, self.sensor_obs)
         # print(vec_sensor)
         return self.sensor_obs
 
