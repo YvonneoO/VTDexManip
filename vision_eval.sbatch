@@ -82,3 +82,48 @@ eval_agent.eval_policy(max_trajs=${MAX_TRAJS})
 fi
 
 echo "---EVAL_DONE: ${TASK_NAME}-${MODEL_NAME} seed${SEED} ckpt=$(basename ${CKPT})---"
+
+# Auto-upload: checkpoint + a per-arm eval-result JSON, straight to HF, no manual step.
+# Success % is parsed from THIS job's own log (the last "Mean success:" line printed
+# by ppo.py's eval() right before it breaks at len(successes_que) > num_envs*max_trajs).
+LOGFILE="/scratch/project/prj-02-phai-lab/yqq/logs/vtdex_eval_${SLURM_JOB_ID}.out"
+SUCCESS_FRAC=$(grep -aE "Mean success:" "${LOGFILE}" | tail -1 | sed -E 's/.*Mean success: ([0-9.eE+-]+).*/\1/')
+echo "SUCCESS_FRAC=${SUCCESS_FRAC}"
+
+"${VTDEX_ENV}/bin/python" - "${TASK_NAME}" "${MODEL_NAME}" "${SEED}" "${CKPT}" "${SUCCESS_FRAC}" "${MAX_TRAJS}" "${SLURM_JOB_ID}" <<'PYEOF'
+import sys, os, json
+from huggingface_hub import HfApi
+
+task, model, seed, ckpt, success_frac, max_trajs, job_id = sys.argv[1:8]
+repo_id = "qqyang/hora-v4-shadow-tennis"
+api = HfApi(token=os.environ["HF_TOKEN"])
+
+ckpt_name = os.path.basename(ckpt)
+hf_ckpt_name = f"{task}-{model}_seed{seed}_{ckpt_name}"
+api.upload_file(
+    path_or_fileobj=ckpt,
+    path_in_repo=f"tactile_sr_ablation/vtdexmanip/checkpoints/{hf_ckpt_name}",
+    repo_id=repo_id, repo_type="model",
+)
+
+result = {
+    "task": task, "arm": model, "seed": int(seed),
+    "checkpoint": hf_ckpt_name,
+    "eval_job_id": job_id,
+    "protocol": "eval_agent.py --test (act_inference, deterministic)",
+    "num_eval_trajectories": int(max_trajs),
+    "success_pct": round(float(success_frac) * 100, 2),
+}
+local_path = os.path.join(os.path.dirname(ckpt), f"eval_result_{task}_{model}.json")
+with open(local_path, "w") as f:
+    json.dump(result, f, indent=2)
+
+api.upload_file(
+    path_or_fileobj=local_path,
+    path_in_repo=f"tactile_sr_ablation/vtdexmanip/eval_results/{task}-{model}_seed{seed}.json",
+    repo_id=repo_id, repo_type="model",
+)
+print(f"UPLOADED ckpt+eval_result for {task}-{model} seed{seed}: {result['success_pct']}%")
+PYEOF
+
+echo "---UPLOAD_DONE: ${TASK_NAME}-${MODEL_NAME}---"
