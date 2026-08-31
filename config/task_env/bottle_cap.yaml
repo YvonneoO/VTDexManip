@@ -65,19 +65,22 @@ env:
   vision:
     camera:
       # relative to table center (height offset = table_dims.z, added by
-      # ShadowHandBase.set_camera -- see _cfg_camera_pose). Original was
-      # eye=[-0.25,0.35,0.5]/lookat=[0.02,-0.02,0.1]: too high/far, includes
-      # the hand-mount pedestals -- pulled in and lowered 2026-08-30 to match
-      # the close arm-end/chest-style framing used for bidexhands data
-      # collection (tight on hand+object, target offset ~0.08 above the
-      # object like the bidexhands BIDEX_CHEST_TARGET_OFFSET convention).
+      # ShadowHandBase.set_camera -- see _cfg_camera_pose). Iterating toward
+      # the arm-end/chest-style framing bidexhands uses for data collection:
+      # v1 (original) [-0.25,0.35,0.5]/[0.02,-0.02,0.1] -- too wide/high,
+      # included the hand-mount pedestal. v2 [-0.13,0.18,0.28]/[0,0,0.08] --
+      # overcorrected, too tight (only object + fingertips visible per user
+      # check 2026-08-30). v3 below splits the difference (~70% of v1's
+      # distance) to bring the rest of the hand back into frame.
       eye: [
-        [ -0.13, 0.18, 0.28 ],
-#        [ -0.25, 0.35, 0.5 ], # original, too wide/high
+        [ -0.17, 0.24, 0.37 ],
+#        [ -0.13, 0.18, 0.28 ], # v2, too tight
+#        [ -0.25, 0.35, 0.5 ],  # v1 (original), too wide/high
       ]
       lookat: [
-        [ 0.0, 0.0, 0.08 ],
-#        [ 0.02, -0.02, 0.1 ], # original
+        [ 0.0, 0.0, 0.1 ],
+#        [ 0.0, 0.0, 0.08 ],   # v2
+#        [ 0.02, -0.02, 0.1 ], # v1 (original)
       ]
 
   random_load:
