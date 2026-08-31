@@ -287,9 +287,14 @@ class ReorientUp(ShadowHandBase):
                 self.gym.set_rigid_body_color(env_ptr, goal_actor, o, gymapi.MESH_VISUAL, obj_color)
 
 
-            # Vision
-            if self.cfg["env"]["obs_type"] in ["VisTac", "VisOnly"]:
-                self._load_cameras(env_ptr, i, self.camera_props, self.camera_eye_list, self.camera_lookat_list)
+            # Vision -- unconditional (matches bottle_cap.py/slide.py), not gated by
+            # obs_type. Debug/data-collection rollouts (rollout_record.py) manually
+            # allocate task.img_buf for non-visual obs_types to render a check video,
+            # but that needs the camera SENSOR to actually exist -- reorient_up was the
+            # only task gating camera creation behind obs_type in ["VisTac","VisOnly"],
+            # which made rollout_record.py crash with IndexError on an empty
+            # camera_rgb_tensor_list for Base/TacGT (caught 2026-08-31).
+            self._load_cameras(env_ptr, i, self.camera_props, self.camera_eye_list, self.camera_lookat_list)
 
             if self.aggregate_mode > 0:
                 self.gym.end_aggregate(env_ptr)
