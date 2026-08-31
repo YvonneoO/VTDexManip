@@ -28,13 +28,19 @@ import sys
 
 import numpy as np
 
+# This script lives in tactile_collection/, but utils.hydra_utils/model.process_sarl
+# are resolved relative to the repo root (same as eval_agent.py/train_agent.py,
+# which live AT the root) -- add cwd (the sbatch launcher cd's into VTDEX_ROOT
+# before invoking python) so those imports resolve the same way.
+sys.path.insert(0, os.getcwd())
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from utils.hydra_utils import parse_sim_params, parse_task, set_np_formatting, set_seed, get_args
 from model.process_sarl import process_sarl
 
 import torch  # must come after the isaacgym-importing modules above
 from isaacgym import gymapi
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from egotouch_taxels import EgoTouchTaxelMapper  # noqa: E402
 
 HAND_COLOR = (0.42, 0.52, 0.56)  # bidexhands data-collection convention (BIDEX_HAND_COLOR_RGB default)
