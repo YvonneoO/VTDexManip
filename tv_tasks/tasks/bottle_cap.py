@@ -610,13 +610,27 @@ class BottleCap(ShadowHandBase):
                     output[j, i] = 1.0
 
         return output
-    def compute_sensor_obs(self):
+    def compute_sensor_obs(self, gt_continuous=False):
         # forces and torques
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         # vec_sensor = self.vec_sensor_tensor
         vec_sensor = contact
         vec_sensor = torch.norm(vec_sensor, p=2, dim=2)
         self.force = vec_sensor.cpu().numpy()
+        if gt_continuous:
+            # PPO P+GT-Tac arm: raw continuous per-link force magnitude [N], same
+            # 20 sensors as the binarized path below, but skips add_gaussian_noise/
+            # hysteresis_thresholding/thresholding entirely -- this is meant to be
+            # the ground-truth signal, not a re-creation of VTDexManip's own
+            # binarized-tactile-pretraining convention.
+            if self.tactile_refresh_inv <= 1:
+                self.sensor_obs = vec_sensor
+            else:
+                if not hasattr(self, "sensor_obs") or self.sensor_obs is None:
+                    self.sensor_obs = vec_sensor.clone()
+                refresh_mask = ((self.progress_buf - 1) % self.tactile_refresh_inv == 0).unsqueeze(-1)
+                self.sensor_obs = torch.where(refresh_mask, vec_sensor, self.sensor_obs)
+            return self.sensor_obs
         if self.tac_noise is not None:
             vec_sensor = self.add_gaussian_noise(vec_sensor, std=self.tac_noise)
             if self.hysteresis:

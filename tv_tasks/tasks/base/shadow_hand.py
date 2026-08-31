@@ -829,27 +829,12 @@ class ShadowHandBase(BaseTask):
         pixel_obs = torch.flatten(self.img_buf, start_dim=1, end_dim=-1)
         return pixel_obs
 
-    def compute_sensor_obs(self, gt_continuous=False):
+    def compute_sensor_obs(self):
         # forces and torques
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         # vec_sensor = self.vec_sensor_tensor
         vec_sensor = contact
         vec_sensor = torch.norm(vec_sensor, p=2, dim=2)
-        if gt_continuous:
-            # PPO P+GT-Tac arm: same per-link force-sensor signal as the native
-            # tactile obs, but the raw continuous force magnitude [N] instead of
-            # binarizing at the 0.01N threshold. Not what VTDexManip's own
-            # t_scr/T-Pretrain models use (they match the paper's own binarized
-            # tactile-pretraining convention) -- this is a deliberate deviation
-            # for testing ground-truth (non-binary) tactile's effect on PPO.
-            if self.tactile_refresh_inv <= 1:
-                self.sensor_obs = vec_sensor
-            else:
-                if not hasattr(self, "sensor_obs") or self.sensor_obs is None:
-                    self.sensor_obs = vec_sensor.clone()
-                refresh_mask = ((self.progress_buf - 1) % self.tactile_refresh_inv == 0).unsqueeze(-1)
-                self.sensor_obs = torch.where(refresh_mask, vec_sensor, self.sensor_obs)
-            return self.sensor_obs
         touched = torch.zeros_like(vec_sensor)
         touched[vec_sensor > 0.01] = 1
 
