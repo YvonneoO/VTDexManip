@@ -436,6 +436,11 @@ class HandOver(ShadowHandBase):
         self.gym.refresh_dof_force_tensor(self.sim)
 
         robot_state = self.compute_robot_state(full_obs=True)
+        # compute_object_state() also sets self.object_pos/object_rot/goal_pos/
+        # goal_rot as a side effect -- compute_reward() needs those internally
+        # regardless of whether the policy's own observation sees them, so this
+        # must always run; only the *concatenation into base_state* is stripped.
+        object_state = self.compute_object_state(set_goal=True)
         if self.strip_privileged_obj_state:
             # PPO true P-only arm (handover-base_ponly): unlike every other task in
             # this ablation, handover's own shipped 'base' bakes privileged object
@@ -443,7 +448,6 @@ class HandOver(ShadowHandBase):
             # so 'P-only' means the same thing here as everywhere else in the study.
             base_state = robot_state
         else:
-            object_state = self.compute_object_state(set_goal=True)
             base_state = torch.cat((robot_state, object_state), dim=1)
         base_state = torch.clamp(base_state, -self.cfg["env"]["clip_observations"], self.cfg["env"]["clip_observations"])
 
@@ -576,7 +580,7 @@ class HandOver(ShadowHandBase):
             all_object_state = object_state
         return  all_object_state
 
-    def compute_sensor_obs(self):
+    def compute_sensor_obs(self, gt_continuous=False):
         # # forces and torques
         # contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         # # vec_sensor = self.vec_sensor_tensor
@@ -587,8 +591,10 @@ class HandOver(ShadowHandBase):
         # # print(vec_sensor)
 
         a_contact = self.contact_force[self.another_hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
-        a_vec_sensor = a_contact
-        a_vec_sensor = torch.norm(a_vec_sensor, p=2, dim=2)
+        a_vec_sensor = torch.norm(a_contact, p=2, dim=2)
+        if gt_continuous:
+            self.sensor_obs = a_vec_sensor
+            return self.sensor_obs
         a_sensor_obs = torch.zeros_like(a_vec_sensor)
         a_sensor_obs[a_vec_sensor > 0.01] = 1
         # self.sensor_obs = torch.logical_or(sensor_obs, a_sensor_obs)
