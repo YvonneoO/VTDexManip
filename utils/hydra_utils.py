@@ -475,6 +475,13 @@ def get_args():
         # not "P+obj_states+tactile", consistent with every other arm/task in
         # this ablation. No-op for tasks that don't read this flag.
         args.task_envs["env"]["stripPrivilegedObjState"] = True
+        if args.task.split("-")[0] == "handover":
+            # Stripping cuts base_state from 338-dim (robot_state+object_state,
+            # config's own declared prop dim) to 334-dim (robot_state alone,
+            # confirmed empirically from the actor network's first Linear layer
+            # shape-mismatch on first launch) -- the policy's input layer size
+            # must match or torch.matmul fails on the very first act() call.
+            args.task_envs["env"]["obs_dim"]["prop"] = 334
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"
@@ -490,6 +497,8 @@ def get_args():
         args.models["policy"]["actor_critic"] = "ActorCritic"
         args.task_envs["env"]["obs_type"] = "Base"
         args.task_envs["env"]["stripPrivilegedObjState"] = True
+        # See the t_scr_gt branch's comment above -- same 338->334 dim shift.
+        args.task_envs["env"]["obs_dim"]["prop"] = 334
 
     elif args.task.split("-")[-1] == "mvp":
         args.models["encoder"]["name"] = "VMVP"
