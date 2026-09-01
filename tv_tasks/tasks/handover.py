@@ -436,9 +436,15 @@ class HandOver(ShadowHandBase):
         self.gym.refresh_dof_force_tensor(self.sim)
 
         robot_state = self.compute_robot_state(full_obs=True)
-        object_state = self.compute_object_state(set_goal=True)
-        # base_state = robot_state
-        base_state = torch.cat((robot_state, object_state), dim=1)
+        if self.strip_privileged_obj_state:
+            # PPO true P-only arm (handover-base_ponly): unlike every other task in
+            # this ablation, handover's own shipped 'base' bakes privileged object
+            # + goal pose into every obs_type including Base -- this flag strips it
+            # so 'P-only' means the same thing here as everywhere else in the study.
+            base_state = robot_state
+        else:
+            object_state = self.compute_object_state(set_goal=True)
+            base_state = torch.cat((robot_state, object_state), dim=1)
         base_state = torch.clamp(base_state, -self.cfg["env"]["clip_observations"], self.cfg["env"]["clip_observations"])
 
         # right hand finger
@@ -497,6 +503,13 @@ class HandOver(ShadowHandBase):
 
         elif self.obs_type == 'Base':
             self.obs_states_buf = base_state
+
+        elif self.obs_type == 'TacGT':
+            # PPO P+GT-Tac arm: proprioception (+ privileged obj/goal state unless
+            # strip_privileged_obj_state) + continuous per-link force-sensor
+            # magnitude from the off hand (same sensor set TacOnly binarizes).
+            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
     def compute_robot_state(self, full_obs=False):
         # dof_state = self.dof_state.view(self.num_envs, -1, 2)

@@ -461,19 +461,35 @@ def get_args():
         # PPO P+GT-Tac arm: same P+tactile architecture as t_scr (ActorCriticT,
         # plain mlp encoder, 20 force-sensor dims), but obs_type="TacGT" returns
         # continuous per-link force magnitude instead of t_scr's binarized signal.
-        # Implemented for bottle_cap, reorient_up, and slide's own
-        # compute_observations()/compute_sensor_obs() overrides (each task
-        # subclasses these, so each needed its own TacGT branch + gt_continuous
-        # param -- not shared via the base ShadowHandBase class).
+        # Implemented for bottle_cap, reorient_up, slide, reorient_down, and
+        # handover's own compute_observations()/compute_sensor_obs() overrides
+        # (each task subclasses these, so each needed its own TacGT branch +
+        # gt_continuous param -- not shared via the base ShadowHandBase class).
         args.models["encoder"]["name"] = "mlp"
         args.models["policy"]["actor_critic"] = "ActorCriticT"
         args.models["learn"]["nminibatches"] = 4
         args.task_envs["env"]["obs_type"] = "TacGT"
         args.task_envs["env"]["obs_dim"]["tac"] = 20
+        # handover's own base_state bakes in privileged object+goal pose unless
+        # this is set -- strip it here too so P+GT-Tac means "P+tactile only",
+        # not "P+obj_states+tactile", consistent with every other arm/task in
+        # this ablation. No-op for tasks that don't read this flag.
+        args.task_envs["env"]["stripPrivilegedObjState"] = True
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"
         args.task_envs["env"]["obs_type"] = "Base"
+    elif args.task.split("-")[-1] == "base_ponly":
+        # handover-only: VTDexManip's own 'base' bakes privileged object+goal pose
+        # into every obs_type for this task alone (unlike bottle_cap/reorient_up/
+        # slide/reorient_down, where that concatenation is commented out) -- this
+        # is the true P-only arm, matching the P-only definition used everywhere
+        # else in this ablation. Comparable to other tasks' 'base'; NOT comparable
+        # to handover's own 'base', which stays as VTDexManip's as-shipped P+obj_states arm.
+        args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
+        args.models["policy"]["actor_critic"] = "ActorCritic"
+        args.task_envs["env"]["obs_type"] = "Base"
+        args.task_envs["env"]["stripPrivilegedObjState"] = True
 
     elif args.task.split("-")[-1] == "mvp":
         args.models["encoder"]["name"] = "VMVP"

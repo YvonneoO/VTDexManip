@@ -109,6 +109,7 @@ class ShadowHandBase(BaseTask):
         # can be "openai", "full_no_vel", "full", "full_state"
         self.obs_type = self.cfg["env"]["obs_type"]
         self.full_obs = self.cfg["env"].get("full_obs", False)
+        self.strip_privileged_obj_state = self.cfg["env"].get("stripPrivilegedObjState", False)
         # if not (self.obs_type in ["openai", "full_no_vel", "full", "full_state"]):
         #     raise Exception(
         #         "Unknown type of observations!\nobservationType should be one of: [openai, full_no_vel, full, full_state]")
