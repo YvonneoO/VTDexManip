@@ -537,12 +537,23 @@ class ScrewFaucet(ShadowHandBase):
         elif self.obs_type == 'Base':
             self.obs_states_buf = base_state
 
-    def compute_sensor_obs(self):
+        elif self.obs_type == 'TacGT':
+            # PPO P+GT-Tac arm: proprioception + continuous per-link force-sensor
+            # magnitude (same 20 sensors as TacOnly, not binarized). Mirrors
+            # bottle_cap.py/reorient_down.py's TacGT branch; this task has no
+            # fingertip_tac attribute so there's no OR-into-binary logic to skip.
+            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+
+    def compute_sensor_obs(self, gt_continuous=False):
         # forces and torques
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         # vec_sensor = self.vec_sensor_tensor
         vec_sensor = contact
         vec_sensor = torch.norm(vec_sensor, p=2, dim=2)
+        if gt_continuous:
+            self.sensor_obs = vec_sensor
+            return self.sensor_obs
         self.sensor_obs = torch.zeros_like(vec_sensor)
         self.sensor_obs[vec_sensor > self.tactile_theshold] = 1
         # print(vec_sensor)

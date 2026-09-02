@@ -461,10 +461,17 @@ def get_args():
         # PPO P+GT-Tac arm: same P+tactile architecture as t_scr (ActorCriticT,
         # plain mlp encoder, 20 force-sensor dims), but obs_type="TacGT" returns
         # continuous per-link force magnitude instead of t_scr's binarized signal.
-        # Implemented for bottle_cap, reorient_up, slide, reorient_down, and
-        # handover's own compute_observations()/compute_sensor_obs() overrides
-        # (each task subclasses these, so each needed its own TacGT branch +
-        # gt_continuous param -- not shared via the base ShadowHandBase class).
+        # Implemented for bottle_cap, reorient_up, slide, reorient_down,
+        # handover, and screw_faucet's own compute_observations()/
+        # compute_sensor_obs() overrides (each task subclasses these, so each
+        # needed its own TacGT branch + gt_continuous param -- not shared via
+        # the base ShadowHandBase class). screw_faucet was missing this until
+        # 2026-09-02 -- its first t_scr_gt launch (job 482590) silently never
+        # updated obs_states_buf at all (no matching elif branch), so the
+        # policy trained on a frozen/stale observation the whole run and
+        # collapsed to 0.00% success. Not a task-difficulty finding -- a
+        # missing branch. If a NEW task is ever added to this ablation, it
+        # needs the same TacGT branch before t_scr_gt is launched for it.
         args.models["encoder"]["name"] = "mlp"
         args.models["policy"]["actor_critic"] = "ActorCriticT"
         args.models["learn"]["nminibatches"] = 4
