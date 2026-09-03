@@ -25,7 +25,7 @@ learn:
   print_log: True
 
   # rollout params
-  max_iterations: 2200
+  max_iterations: 4400
 
   # training params
   cliprange: 0.2

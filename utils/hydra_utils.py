@@ -375,6 +375,16 @@ def get_args():
         args.task_envs["env"]["obs_type"] = "TacOnly"
         args.task_envs["env"]["obs_dim"]["tac"] = 20
         args.models["encoder"]["en_mode"] = "cls"
+        # handover's own base_state bakes in privileged object+goal pose unless
+        # this is set -- strip it here too so T-Pretrain means "P+Tac only", not
+        # "P+obj_states+Tac", consistent with t_scr_gt/base_ponly. No-op for
+        # tasks that don't read this flag. See t_scr_gt's comment above for the
+        # obs_dim['prop'] 338->314 rationale (ActorCriticTEncoder.state_enc is
+        # also Linear(obs_dim['prop'], emb_dim), same shape-mismatch failure
+        # mode if this is wrong).
+        args.task_envs["env"]["stripPrivilegedObjState"] = True
+        if args.task.split("-")[0] == "handover":
+            args.task_envs["env"]["obs_dim"]["prop"] = 314
     elif args.task.split("-")[-1] == "tac_all_cls_tacts1":
         args.models["encoder"]["name"] = "t20-retac-tmr05-bin-ft-cls+dataset-ViTacReal-all-310"
         args.models["policy"]["actor_critic"] = "ActorCriticTEncoder"
