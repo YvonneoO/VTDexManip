@@ -27,7 +27,7 @@ learn:
   print_log: True
 
   # rollout params
-  max_iterations: 2100
+  max_iterations: 4200
   max_len: 200
 
 
