@@ -502,6 +502,21 @@ def get_args():
             # shape-mismatch on launch -- must match exactly or torch.matmul
             # fails on the very first act() call.
             args.task_envs["env"]["obs_dim"]["prop"] = 314
+    elif args.task.split("-")[-1] == "t_scr_gt_priv":
+        # handover-only probe: does GT tactile help ON TOP OF privileged
+        # obj+goal state, even though obj_state alone (as-shipped base, job
+        # 481735) and GT tactile alone (t_scr_gt, stripped) both landed at
+        # 0.00%? Neither of those rules out "needs both together" for a task
+        # this coordination-heavy. Identical to t_scr_gt except
+        # stripPrivilegedObjState is intentionally left unset (False), so
+        # base_state keeps obj+goal pose and obs_dim['prop'] stays the
+        # config's default 338 -- matches as-shipped base's dimension exactly,
+        # with the same 20-dim TacGT channel added on top.
+        args.models["encoder"]["name"] = "mlp"
+        args.models["policy"]["actor_critic"] = "ActorCriticT"
+        args.models["learn"]["nminibatches"] = 4
+        args.task_envs["env"]["obs_type"] = "TacGT"
+        args.task_envs["env"]["obs_dim"]["tac"] = 20
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"
