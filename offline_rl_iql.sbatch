@@ -53,6 +53,13 @@ export HF_HOME="${YQQ}/.cache/huggingface"
 export TORCH_HOME="${YQQ}/.cache/torch"
 export PYTHONUNBUFFERED=1
 
+# numpy's bundled OpenBLAS auto-detects the NODE's full core count (not this job's
+# cgroup-limited --cpus-per-task), then crashes with RLIMIT_NPROC pthread_create
+# failures trying to spawn that many threads -- cap explicitly to what was requested.
+export OPENBLAS_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
+export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK:-2}"
+
 D3RLPY_ENV="${YQQ}/envs/d3rlpy_offline"
 export PATH="${D3RLPY_ENV}/bin:${PATH}"
 export LD_LIBRARY_PATH="${D3RLPY_ENV}/lib:${LD_LIBRARY_PATH:-}"
