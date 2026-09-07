@@ -33,7 +33,9 @@ cd "${YQQ}"
 source "${YQQ}/env.sh"
 
 VTDEX_ENV="${YQQ}/envs/vtdexmanip"
-export PATH="${VTDEX_ENV}/bin:${PATH}"
+# ffmpeg isn't installed in vtdexmanip -- it lives in the tactile-qc env. Append
+# (not prepend) so vtdexmanip's own python still resolves first.
+export PATH="${VTDEX_ENV}/bin:${PATH}:${YQQ}/envs/tactile-qc/bin"
 
 cd "${VTDEX_ROOT}"
 
