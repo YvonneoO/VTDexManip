@@ -11,14 +11,17 @@
 #SBATCH --output=/scratch/project/prj-02-phai-lab/yqq/logs/vtdex_collect_%j.out
 #SBATCH --error=/scratch/project/prj-02-phai-lab/yqq/logs/vtdex_collect_%j.err
 #
-# Full-frame (RGB + dof_pos + EgoTouch tactile) successful-trajectory collector
-# for BottleCap Turning -- tactile_collection/collect_bottle_cap_tactile.py.
-# BottleCap is single-handed and --test mode hardcodes numEnvs=10 (one per seen
-# object); the collector runs all 10 in parallel independently.
+# Full-frame (RGB + dof_pos + EgoTouch tactile) successful-trajectory collector.
+# Defaults to BottleCap Turning (tactile_collection/collect_bottle_cap_tactile.py);
+# pass COLLECT_SCRIPT to use a different task's collector (e.g.
+# tactile_collection/collect_slide_tactile.py). Each task is single-handed and
+# --test mode hardcodes numEnvs=len(env_dict) (10 for bottle_cap, 5 for slide,
+# one per seen object) -- the collector runs all of them in parallel independently.
 #
 # Required (--export=ALL,...): TASK_NAME (e.g. bottle_cap), MODEL_NAME (e.g. vt_all_cls),
 #   CHECKPOINT (full path to model_<iter>.pt), TARGET_SUCCESSES, OUT_DIR
-# Optional: SEED (default 111), MAX_STEPS (default 2000000)
+# Optional: SEED (default 111), MAX_STEPS (default 2000000), COLLECT_SCRIPT
+#   (default tactile_collection/collect_bottle_cap_tactile.py)
 
 set -euo pipefail
 
@@ -50,6 +53,7 @@ export PATH="${VTDEX_ENV}/bin:${PATH}"
 export LD_LIBRARY_PATH="${VTDEX_ENV}/lib:${LD_LIBRARY_PATH:-}"
 
 SEED="${SEED:-111}"
+COLLECT_SCRIPT="${COLLECT_SCRIPT:-tactile_collection/collect_bottle_cap_tactile.py}"
 
 echo "HOST=$(hostname)"
 echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
@@ -59,11 +63,12 @@ echo "CHECKPOINT=${CHECKPOINT}"
 echo "SEED=${SEED}"
 echo "TARGET_SUCCESSES=${TARGET_SUCCESSES}"
 echo "OUT_DIR=${OUT_DIR}"
+echo "COLLECT_SCRIPT=${COLLECT_SCRIPT}"
 
 cd "${VTDEX_ROOT}"
 mkdir -p "${OUT_DIR}"
 
-"${VTDEX_ENV}/bin/python" tactile_collection/collect_bottle_cap_tactile.py \
+"${VTDEX_ENV}/bin/python" "${COLLECT_SCRIPT}" \
   --task "${TASK_NAME}-${MODEL_NAME}" \
   --rl_device cuda:0 \
   --resume_model "${CHECKPOINT}" \
