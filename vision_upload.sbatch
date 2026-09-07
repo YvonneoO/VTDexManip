@@ -16,7 +16,7 @@
 #
 # Required (--export=ALL,...): PAIRS (space-separated "task:model" tokens, e.g.
 #   "bottle_cap:base bottle_cap:t_scr_gt slide:base")
-# Optional: SEED (default 111), SKIP_VIDEO=1, SKIP_CKPT=1
+# Optional: SEED (default 111), SKIP_VIDEO=1, SKIP_CKPT=1, DELETE_OTHERS=1
 
 set -euo pipefail
 
@@ -37,6 +37,7 @@ SEED="${SEED:-111}"
 EXTRA_FLAGS=""
 [[ -n "${SKIP_VIDEO:-}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --skip_video"
 [[ -n "${SKIP_CKPT:-}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --skip_ckpt"
+[[ -n "${DELETE_OTHERS:-}" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --delete_others"
 
 cd "${VTDEX_ROOT}"
 

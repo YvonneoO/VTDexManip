@@ -1,13 +1,15 @@
 """Standalone HF upload for a VTDexManip checkpoint + its rollout-check videos.
 
 Mirrors vision_eval.sbatch's checkpoint-upload convention (same repo_id, same
-tactile_sr_ablation/vtdexmanip/checkpoints/ naming) so checkpoints land in the
-same place whether uploaded via a completed eval job or standalone here. Adds a
+tactile_sr_ablation/vtdexmanip/checkpoints/<task>/ naming, one HF folder per task
+so multi-arm tasks don't dump everything flat) so checkpoints land in the same
+place whether uploaded via a completed eval job or standalone here. Adds a
 tactile_sr_ablation/vtdexmanip/rollout_check/<task>-<model>_seed<seed>/ path for
 videos, extending the earlier vtdexmanip/base_rollout_check/ convention to cover
 every arm, not just base.
 
 Usage: python upload_ckpt_and_rollout.py --task screw_faucet --model t_scr_gt
+       python upload_ckpt_and_rollout.py --task screw_faucet --model t_scr_gt --delete_others
 """
 import argparse
 import glob
@@ -35,6 +37,11 @@ def main():
     ap.add_argument("--vtdex_root", default=VTDEX_ROOT_DEFAULT)
     ap.add_argument("--skip_ckpt", action="store_true")
     ap.add_argument("--skip_video", action="store_true")
+    ap.add_argument("--delete_others", action="store_true",
+                     help="after a successful checkpoint upload, delete every other "
+                          "model_*.pt in the same checkpoint dir (VISION scratch is "
+                          "near quota) -- the just-uploaded latest one is kept, and "
+                          "it's already backed up on HF at this point")
     args = ap.parse_args()
 
     task, model, seed = args.task, args.model, args.seed
@@ -48,10 +55,20 @@ def main():
         hf_ckpt_name = f"{task}-{model}_seed{seed}_{os.path.basename(ckpt)}"
         api.upload_file(
             path_or_fileobj=ckpt,
-            path_in_repo=f"tactile_sr_ablation/vtdexmanip/checkpoints/{hf_ckpt_name}",
+            path_in_repo=f"tactile_sr_ablation/vtdexmanip/checkpoints/{task}/{hf_ckpt_name}",
             repo_id=REPO_ID, repo_type="model",
         )
-        print(f"UPLOADED checkpoint: {hf_ckpt_name}")
+        print(f"UPLOADED checkpoint: {task}/{hf_ckpt_name}")
+
+        if args.delete_others:
+            ckpt_dir = os.path.dirname(ckpt)
+            siblings = [p for p in glob.glob(os.path.join(ckpt_dir, "model_*.pt")) if p != ckpt]
+            for p in siblings:
+                os.remove(p)
+            if siblings:
+                print(f"DELETED {len(siblings)} older checkpoint(s) in {ckpt_dir}, kept {os.path.basename(ckpt)}")
+            else:
+                print(f"no older checkpoints to delete in {ckpt_dir}")
     else:
         print(f"skip_ckpt: {os.path.basename(ckpt)}")
 
