@@ -421,7 +421,7 @@ class BottleCap(ShadowHandBase):
         elif self.obs_type == 'TacGT':
             # PPO P+GT-Tac arm: proprioception + continuous per-link force-sensor
             # magnitude (same 20 sensors as TacOnly/t_scr, not binarized).
-            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
     def reset_idx(self, env_ids, goal_env_ids):

@@ -62,6 +62,12 @@ class ShadowHandBase(BaseTask):
 
         self.vel_obs_scale = 0.2  # scale factor of velocity based observations
         self.force_torque_obs_scale = 10.0  # scale factor of velocity based observations
+        # See base/shadow_hand.py's tac_gt_obs_scale for the full rationale --
+        # TacGT's raw contact-force-norm channel had no scale at all, confirmed
+        # to saturate clip_observations=5.0 on 42.5-52.4% of active-contact
+        # readings during a real rollout. 0.1 matches bidexhands'
+        # tactile_extra_obs_scale convention.
+        self.tac_gt_obs_scale = 0.1
 
         self.startPositionNoise = self.cfg["env"]["startPositionNoise"]
         print(f"startPositionNoise --> {self.startPositionNoise}")

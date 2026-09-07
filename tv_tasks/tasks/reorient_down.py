@@ -511,7 +511,7 @@ class ReorientDown(ShadowHandBase):
             # magnitude (same 20 sensors as TacOnly, not binarized -- skips the
             # fingertip_tac OR-into-binary logic below, which has no clean
             # continuous analog).
-            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
     def compute_expert_state(self):
         return torch.clamp(self.compute_robot_state(True), -self.cfg["env"]["clip_observations"], self.cfg["env"]["clip_observations"])

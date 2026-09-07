@@ -494,7 +494,7 @@ class Sliding(ShadowHandBase):
             # magnitude (same 20 sensors as TacOnly, not binarized -- skips the
             # separate fingertip_force OR-into-binary logic below, which has no
             # clean continuous analog).
-            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
     def compute_sensor_obs(self, gt_continuous=False):

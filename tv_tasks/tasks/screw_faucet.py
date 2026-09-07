@@ -542,7 +542,7 @@ class ScrewFaucet(ShadowHandBase):
             # magnitude (same 20 sensors as TacOnly, not binarized). Mirrors
             # bottle_cap.py/reorient_down.py's TacGT branch; this task has no
             # fingertip_tac attribute so there's no OR-into-binary logic to skip.
-            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
     def compute_sensor_obs(self, gt_continuous=False):

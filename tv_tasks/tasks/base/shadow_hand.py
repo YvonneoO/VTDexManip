@@ -62,6 +62,16 @@ class ShadowHandBase(BaseTask):
 
         self.vel_obs_scale = 0.2  # scale factor of velocity based observations
         self.force_torque_obs_scale = 10.0  # scale factor of velocity based observations
+        # Scale factor for TacGT's raw per-link contact-force-norm channel (see
+        # compute_sensor_obs(gt_continuous=True) in each task file). Unlike every
+        # other force-like observation above, that channel was concatenated with
+        # NO scale at all -- diag_tactile_scale.py confirmed 42.5% (screw_faucet)
+        # to 52.4% (bottle_cap) of real, active-contact readings during a trained
+        # policy's rollout already exceed clip_observations=5.0 and get flattened
+        # to a contact-strength-independent constant. Same bug class as
+        # bidexhands' tactile_extra_obs_scale=0.1 (dexteroushands_fork), never
+        # ported to this fork. 0.1 matches that already-validated convention.
+        self.tac_gt_obs_scale = 0.1
 
         self.startPositionNoise = self.cfg["env"]["startPositionNoise"]
         print(f"startPositionNoise --> {self.startPositionNoise}")

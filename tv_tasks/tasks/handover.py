@@ -512,7 +512,7 @@ class HandOver(ShadowHandBase):
             # PPO P+GT-Tac arm: proprioception (+ privileged obj/goal state unless
             # strip_privileged_obj_state) + continuous per-link force-sensor
             # magnitude from the off hand (same sensor set TacOnly binarizes).
-            touch_force_obs_gt = self.compute_sensor_obs(gt_continuous=True)
+            touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
     def compute_robot_state(self, full_obs=False):
