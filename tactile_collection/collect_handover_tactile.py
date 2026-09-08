@@ -59,7 +59,15 @@ GOAL_MARKER_HIDE_POS = (0.0, 0.0, -10.0)  # well below the floor, outside every 
 def hide_goal_marker(task):
     """Teleport the visual goal-marker object out of camera view every step (see
     module docstring for why this is safe -- purely cosmetic, decoupled from
-    reward/success)."""
+    reward/success).
+
+    Needs an explicit step_graphics() after the tensor-API teleport: base1/
+    shadow_hand.py's compute_pixel_obs() calls gym.render_all_camera_sensors()
+    directly with no graphics sync of its own (confirmed by reading it) --
+    without this, the render still reflects whatever pose env.step()'s own
+    internal step_graphics() last synced (i.e. the PRE-teleport position),
+    reproducing the marker for exactly one frame every time (confirmed via a
+    real smoke-test screenshot showing the marker on frame 0 only)."""
     idx = task.goal_object_indices
     task.root_state_tensor[idx, 0] = GOAL_MARKER_HIDE_POS[0]
     task.root_state_tensor[idx, 1] = GOAL_MARKER_HIDE_POS[1]
@@ -70,6 +78,7 @@ def hide_goal_marker(task):
         task.sim, gymtorch.unwrap_tensor(task.root_state_tensor),
         gymtorch.unwrap_tensor(idx_int32), len(idx_int32),
     )
+    task.gym.step_graphics(task.sim)
 
 
 def env0(tensor_or_array, idx):
