@@ -200,8 +200,8 @@ def get_args():
         args.pipeline = "cpu"
     elif args.task.split("-")[0] == "handover":
         args.identifier = "handover"
-        # args.sim_device = "cpu"
-        # args.pipeline = "cpu"
+        args.sim_device = "cpu"
+        args.pipeline = "cpu"
     elif args.task.split("-")[0] == "slide":
         args.identifier = "slide"
         args.sim_device = "cpu"
