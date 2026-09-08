@@ -20,6 +20,15 @@ base/t_scr_gt_priv checkpoints consume) as `obj_state` per frame, so downstream
 IQL feature-building can use the identical task-relevant-state input the trained
 policy saw, not a re-derived approximation.
 
+Hides the visual goal-marker object (a second copy of the object rendered at
+the target hand-off location, see handover.py's _load_goal/reset_target_pose)
+from the RGB camera every step by teleporting it far outside any camera's
+frustum -- confirmed safe because reward/success (compute_object_state's own
+self.goal_pose) reads self.goal_states, a separate cached tensor never tied to
+this actor's live position; the marker's root_state_tensor entry is used ONLY
+for rendering. Without this, the RGB video shows an unexplained second ball
+next to one hand -- a privileged goal cue no real camera would ever see.
+
 Usage:
     python tactile_collection/collect_handover_tactile.py --task handover-t_scr_gt_priv \
         --rl_device cuda:0 --resume_model <ckpt> --test --seed 111 --headless \
@@ -38,12 +47,29 @@ from utils.hydra_utils import parse_sim_params, parse_task, set_np_formatting, s
 from model.process_sarl import process_sarl
 
 import torch  # must come after the isaacgym-importing modules above
-from isaacgym import gymapi
+from isaacgym import gymapi, gymtorch
 
 from egotouch_taxels import EgoTouchTaxelMapper  # noqa: E402
 
 HAND_COLOR = (0.42, 0.52, 0.56)
 MAPPING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+GOAL_MARKER_HIDE_POS = (0.0, 0.0, -10.0)  # well below the floor, outside every camera's frustum
+
+
+def hide_goal_marker(task):
+    """Teleport the visual goal-marker object out of camera view every step (see
+    module docstring for why this is safe -- purely cosmetic, decoupled from
+    reward/success)."""
+    idx = task.goal_object_indices
+    task.root_state_tensor[idx, 0] = GOAL_MARKER_HIDE_POS[0]
+    task.root_state_tensor[idx, 1] = GOAL_MARKER_HIDE_POS[1]
+    task.root_state_tensor[idx, 2] = GOAL_MARKER_HIDE_POS[2]
+    task.root_state_tensor[idx, 7:13] = 0.0
+    idx_int32 = idx.to(torch.int32)
+    task.gym.set_actor_root_state_tensor_indexed(
+        task.sim, gymtorch.unwrap_tensor(task.root_state_tensor),
+        gymtorch.unwrap_tensor(idx_int32), len(idx_int32),
+    )
 
 
 def env0(tensor_or_array, idx):
@@ -167,6 +193,7 @@ def main():
             next_obs, rews, dones, infos = env.step(actions)
             obs.copy_(next_obs)
 
+        hide_goal_marker(task)
         task.compute_pixel_obs()
         obj_state = task.compute_object_state(set_goal=True)
         rews_np = rews.detach().cpu().numpy()
