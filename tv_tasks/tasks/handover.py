@@ -515,6 +515,14 @@ class HandOver(ShadowHandBase):
             touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
 
+        elif self.obs_type == 'PredTac':
+            # PPO P+Pred-Tac arm: same base_state as t_scr_gt_priv (obj_state
+            # KEPT, not stripped -- see hydra_utils.py's "predtac" branch),
+            # tactile sourced from the online tactile-prediction model
+            # instead of GT force sensors. See compute_predtac_obs.
+            touch_force_obs_predtac = self.compute_predtac_obs()
+            self.obs_states_buf = torch.cat((base_state, touch_force_obs_predtac), dim=1)
+
     def compute_robot_state(self, full_obs=False):
         # dof_state = self.dof_state.view(self.num_envs, -1, 2)
         # dof_pos = dof_state[..., 0]
@@ -579,6 +587,78 @@ class HandOver(ShadowHandBase):
         else:
             all_object_state = object_state
         return  all_object_state
+
+    def _predtac_lazy_init(self):
+        """First-call setup for the "PredTac" obs_type: caches this env's own
+        STATIC camera view/proj matrices (VTDexManip's camera is fixed --
+        set once in ShadowHandBase._load_cameras, never repositioned like
+        bidexhands' dynamic chest camera -- so unlike that codebase, no
+        per-tick re-positioning is needed here, only a one-time query) and
+        opens the IPC client talking to Ego2Contact's predtac_server.py
+        (same process/protocol bidexhands' Pen/Scissors PredTac arms use --
+        the server is simulator-agnostic, see predtac_ipc.py's docstring)."""
+        from tv_tasks.tasks.base1.predtac_client import PredTacClient
+
+        run_id = os.environ.get("PREDTAC_RUN_ID")
+        if not run_id:
+            raise RuntimeError("PREDTAC_RUN_ID must be set in the environment for obs_type=PredTac "
+                                "(shared with the predtac_server.py process watching the same run_id)")
+        self._predtac_view_matrices = []
+        self._predtac_proj_matrices = []
+        for i in range(self.num_envs):
+            camera_handle = self.camera_handles[i][0]
+            self._predtac_view_matrices.append(
+                np.asarray(self.gym.get_camera_view_matrix(self.sim, self.envs[i], camera_handle), dtype=np.float64))
+            self._predtac_proj_matrices.append(
+                np.asarray(self.gym.get_camera_proj_matrix(self.sim, self.envs[i], camera_handle), dtype=np.float64))
+        self._predtac_client = PredTacClient(run_id, self.num_envs)
+        print(f"[PredTac] initialized {self.num_envs} static cameras, run_id={run_id}, "
+              f"size={self.cam_w}x{self.cam_h}", flush=True)
+
+    def compute_predtac_obs(self):
+        """Renders this tick's frame per env (same GPU-tensor render path
+        compute_pixel_obs already uses), projects each hand's fingertip
+        points (env-local, so env_origin -- already stored per env in
+        ShadowHandBase._load_cameras -- must be ADDED before projecting with
+        the camera's own GLOBAL-frame matrices; see predtac_utils.py's
+        module docstring for why) into a GT-pose crop box per hand, ships
+        both to the tactile-prediction server, and reads back whatever its
+        most recent response is (may lag behind -- see predtac_ipc.py's
+        docstring; this ablation is explicitly tolerant of that). Returns a
+        (num_envs, 68) tensor: per hand, 17 max-pooled continuous + 17
+        taxel-threshold binary contact values (34/hand)."""
+        from tv_tasks.tasks.base1.predtac_utils import crop_boxes_for_env
+
+        if not hasattr(self, "_predtac_client"):
+            self._predtac_lazy_init()
+
+        self.gym.render_all_camera_sensors(self.sim)
+        self.gym.start_access_image_tensors(self.sim)
+
+        env_origin_np = self.env_origin.detach().cpu().numpy()
+        right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
+        left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
+
+        frames = np.empty((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
+        sides_all_envs = []
+        for i in range(self.num_envs):
+            frames[i] = self.camera_rgb_tensor_list[i][0][:, :, :3].detach().cpu().numpy().astype(np.uint8)
+            sides_all_envs.append(crop_boxes_for_env(
+                right_pts_np[i], left_pts_np[i], env_origin_np[i],
+                self._predtac_view_matrices[i], self._predtac_proj_matrices[i], self.cam_w, self.cam_h))
+
+        self.gym.end_access_image_tensors(self.sim)
+
+        self._predtac_client.submit(frames, sides_all_envs)
+        continuous_np, binary_np = self._predtac_client.poll()  # each (num_envs, 2, 17), slot 0=left, 1=right
+
+        continuous = torch.from_numpy(continuous_np).to(self.device)
+        binary = torch.from_numpy(binary_np).to(self.device)
+        # "right" hand (self.fingertip_pos) first, "left" (a_fingertip_pos) second --
+        # matches compute_robot_state's own robot_state-then-a_robot_state order.
+        right_tactile = torch.cat([continuous[:, 1, :], binary[:, 1, :]], dim=-1)
+        left_tactile = torch.cat([continuous[:, 0, :], binary[:, 0, :]], dim=-1)
+        return torch.cat([right_tactile, left_tactile], dim=-1)
 
     def compute_sensor_obs(self, gt_continuous=False):
         # # forces and torques

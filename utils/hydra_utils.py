@@ -517,6 +517,31 @@ def get_args():
         args.models["learn"]["nminibatches"] = 4
         args.task_envs["env"]["obs_type"] = "TacGT"
         args.task_envs["env"]["obs_dim"]["tac"] = 20
+    elif args.task.split("-")[-1] == "predtac":
+        # PPO P+Pred-Tac arm: mirrors t_scr_gt_priv exactly (the one PROVEN
+        # successful handover arm -- 0%->32.5%, obj_state KEPT,
+        # stripPrivilegedObjState intentionally left unset/False so
+        # obs_dim['prop'] stays the config's default 338), except the
+        # tactile channel is sourced from the ONLINE tactile-prediction
+        # model (predtac_client/predtac_ipc, same asynchronous IPC design as
+        # bidexhands' Pen/Scissors PredTac arms in the DexterousHands repo)
+        # instead of privileged GT force sensors. 68-dim tac channel: per
+        # hand, 17 max-pooled continuous + 17 taxel-threshold binary contact
+        # values (34/hand) -- see handover.py's compute_predtac_obs. Set
+        # here, not hardcoded, so ActorCriticT's mlp tac-segment encoder
+        # sizes its Linear layer to 68 (same config-driven pattern every
+        # other *_tac arm above already relies on for its own dim).
+        args.models["encoder"]["name"] = "mlp"
+        args.models["policy"]["actor_critic"] = "ActorCriticT"
+        args.models["learn"]["nminibatches"] = 4
+        args.task_envs["env"]["obs_type"] = "PredTac"
+        args.task_envs["env"]["obs_dim"]["tac"] = 68
+        # Reduced from the config's default 200, same reasoning as
+        # bidexhands' own Pen/Scissors PredTac arms: this obs_type renders +
+        # IPC-round-trips a camera frame per env per tick, a real added cost
+        # every other arm here never pays. Override via PREDTAC_NUM_ENVS if
+        # a different scale is needed.
+        args.task_envs["env"]["numEnvs"] = int(os.environ.get("PREDTAC_NUM_ENVS", "8"))
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"
