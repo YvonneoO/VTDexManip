@@ -1170,8 +1170,13 @@ class ActorCriticT(nn.Module):
         # Encoder
         emb_dim = encoder_cfg["emb_dim"]
 
+        # tac input width was hardcoded to 20 (t_scr_gt/t_scr_gt_priv's GT-tactile
+        # dim) -- parameterized from env_cfg so other arms (e.g. "predtac"'s
+        # 68-dim online-prediction tactile channel) can use this class too.
+        # Found 2026-09-10: crashed with "mat1 and mat2 shapes cannot be
+        # multiplied (Nx68 and 20x128)" on the first PredTac training step.
         self.obs_enc = nn.Sequential(
-                nn.Linear(20, 128),
+                nn.Linear(env_cfg['obs_dim']['tac'], 128),
                 nn.ReLU(),
                 nn.Linear(128, 256),
                 nn.ReLU(),
