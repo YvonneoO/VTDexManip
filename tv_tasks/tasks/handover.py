@@ -662,6 +662,14 @@ class HandOver(ShadowHandBase):
         self._predtac_client.submit(frames, sides_all_envs)
         continuous_np, binary_np = self._predtac_client.poll()  # each (num_envs, 2, 17), slot 0=left, 1=right
 
+        # Temporary staleness diagnostic (2026-09-10): mirrors the same
+        # instrumentation added to bidexhands' shadow_hand_pen.py/
+        # shadow_hand_scissors.py.
+        _stale = self._predtac_client.staleness_ticks()
+        if self._predtac_client._tick % 25 == 0:
+            print(f"[predtac][staleness] client_tick={self._predtac_client._tick} "
+                  f"stale_ticks={_stale}", flush=True)
+
         continuous = torch.from_numpy(continuous_np).to(self.device)
         binary = torch.from_numpy(binary_np).to(self.device)
         # "right" hand (self.fingertip_pos) first, "left" (a_fingertip_pos) second --

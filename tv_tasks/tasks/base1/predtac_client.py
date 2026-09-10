@@ -53,3 +53,15 @@ class PredTacClient:
             self.continuous = resp["continuous"]
             self.binary = resp["binary"]
         return self.continuous, self.binary
+
+    def staleness_ticks(self):
+        """How many client ticks old the most recent response is, right now
+        -- see the DexterousHands-side predtac_client.py's identical method
+        for the full rationale (this file is kept in sync with that one).
+        -1 = no submit made yet; None = no response ever received yet
+        (still serving all-zero fallback) -- neither means zero lag."""
+        if self._tick == 0:
+            return -1
+        if self.last_tick_seen < 0:
+            return None
+        return (self._tick - 1) - self.last_tick_seen
