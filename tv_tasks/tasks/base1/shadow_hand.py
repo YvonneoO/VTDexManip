@@ -741,6 +741,11 @@ class ShadowHandBase(BaseTask):
         # self.camera_seg_tensor_list.append(seg_tensors)
         self.camera_vinv_mat_list.append(vinv_mats)
         self.camera_proj_mat_list.append(proj_mats)
+        # self.camera_handles is initialized (set_camera) but was never actually
+        # populated here -- found 2026-09-10 chasing an IndexError in the new
+        # PredTac obs_type (the only caller that ever read this attribute; every
+        # other obs_type only reads camera_{rgb_tensor,vinv_mat,proj_mat}_list).
+        self.camera_handles.append(camera_handles)
 
         return
 
