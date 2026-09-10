@@ -83,8 +83,14 @@ def main():
     right_pts_np = task.fingertip_pos.detach().cpu().numpy()
     left_pts_np = task.a_fingertip_pos.detach().cpu().numpy()
 
+    n_cam_envs = len(task.camera_handles)
+    if n_cam_envs != env.num_envs:
+        print(f"[WARN] env.num_envs={env.num_envs} but len(task.camera_handles)={n_cam_envs} -- "
+              f"per-env camera list sizes: {[len(c) for c in task.camera_handles]}", flush=True)
+    n_ready = min(env.num_envs, n_cam_envs)
+
     results = []
-    for i in range(env.num_envs):
+    for i in range(n_ready):
         frame_rgb = task.camera_rgb_tensor_list[i][0][:, :, :3].detach().cpu().numpy().astype(np.uint8)
         frame_bgr = frame_rgb[:, :, ::-1].copy()
         view_matrix = np.asarray(task.gym.get_camera_view_matrix(task.sim, task.envs[i], task.camera_handles[i][0]), dtype=np.float64)
@@ -103,7 +109,7 @@ def main():
 
     n_with_any = sum(1 for r in results if len(r["sides"]) >= 1)
     n_with_both = sum(1 for r in results if len(r["sides"]) == 2)
-    print(f"\n[summary] {env.num_envs} envs, {n_with_any} with >=1 hand box, "
+    print(f"\n[summary] {n_ready}/{env.num_envs} envs had a camera, {n_with_any} with >=1 hand box, "
           f"{n_with_both} with both hands boxed. Wrote images to {out_dir}", flush=True)
     print("PREDTAC_SMOKE_DONE", flush=True)
     if n_with_any == 0:

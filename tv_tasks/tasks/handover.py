@@ -605,14 +605,20 @@ class HandOver(ShadowHandBase):
                                 "(shared with the predtac_server.py process watching the same run_id)")
         self._predtac_view_matrices = []
         self._predtac_proj_matrices = []
-        for i in range(self.num_envs):
+        n_cam_envs = len(self.camera_handles)
+        if n_cam_envs != self.num_envs:
+            print(f"[PredTac][WARN] self.num_envs={self.num_envs} but len(self.camera_handles)={n_cam_envs} "
+                  f"-- per-env camera list sizes: {[len(c) for c in self.camera_handles]}", flush=True)
+        n_ready = min(self.num_envs, n_cam_envs)
+        for i in range(n_ready):
             camera_handle = self.camera_handles[i][0]
             self._predtac_view_matrices.append(
                 np.asarray(self.gym.get_camera_view_matrix(self.sim, self.envs[i], camera_handle), dtype=np.float64))
             self._predtac_proj_matrices.append(
                 np.asarray(self.gym.get_camera_proj_matrix(self.sim, self.envs[i], camera_handle), dtype=np.float64))
+        self._predtac_num_active_envs = n_ready
         self._predtac_client = PredTacClient(run_id, self.num_envs)
-        print(f"[PredTac] initialized {self.num_envs} static cameras, run_id={run_id}, "
+        print(f"[PredTac] initialized {n_ready}/{self.num_envs} static cameras, run_id={run_id}, "
               f"size={self.cam_w}x{self.cam_h}", flush=True)
 
     def compute_predtac_obs(self):
@@ -639,9 +645,13 @@ class HandOver(ShadowHandBase):
         right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
         left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
 
-        frames = np.empty((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
+        n_active = self._predtac_num_active_envs
+        frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
         sides_all_envs = []
         for i in range(self.num_envs):
+            if i >= n_active:
+                sides_all_envs.append({})  # no camera for this env -- see _predtac_lazy_init's [WARN]
+                continue
             frames[i] = self.camera_rgb_tensor_list[i][0][:, :, :3].detach().cpu().numpy().astype(np.uint8)
             sides_all_envs.append(crop_boxes_for_env(
                 right_pts_np[i], left_pts_np[i], env_origin_np[i],
