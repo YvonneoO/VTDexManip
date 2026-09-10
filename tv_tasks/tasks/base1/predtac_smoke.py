@@ -14,20 +14,30 @@ just computed (via the same predtac_utils.crop_boxes_for_env call, fed the
 task's own live state) purely to draw + save them for visual inspection --
 does not modify handover.py further for this.
 
-Usage: PREDTAC_RUN_ID=smoke_test python -m tv_tasks.tasks.base1.predtac_smoke \\
+Usage (run as a PLAIN SCRIPT from the repo root, NOT `python -m ...` -- see
+below for why): PREDTAC_RUN_ID=smoke_test python tv_tasks/tasks/base1/predtac_smoke.py \\
     --task handover-predtac --rl_device cuda:0 --seed 3204 --headless
 """
 import os
+import sys
 
 os.environ.setdefault("PREDTAC_RUN_ID", "smoke_test")
 
-# IsaacGym must be imported before torch (its own gymdeps guard enforces this
-# -- see isaacgym/python/isaacgym/gymdeps.py). hydra_utils.parse_task() pulls
-# in tv_tasks.tasks -> isaacgym.torch_utils transitively, so these two
-# project imports MUST come before `import torch` below. Bit us 2026-09-10:
-# the original import order here (torch before hydra_utils) crashed every
-# single invocation with "PyTorch was imported before isaacgym modules" --
-# this smoke test had never actually run once until this was fixed.
+# `python -m tv_tasks.tasks.base1.predtac_smoke` (the original invocation)
+# CANNOT work here, no matter this file's own import order: `-m` resolves the
+# dotted path by importing tv_tasks -> tv_tasks.tasks -> tv_tasks.tasks.base1
+# BEFORE this file's body ever runs, and tv_tasks/tasks/__init__.py
+# unconditionally does `from .bottle_cap import BottleCap` -> ... ->
+# `from isaacgym.torch_utils import *`. If anything already imported torch by
+# then, isaacgym's own gymdeps guard aborts -- and there's no way for this
+# file's own imports (which haven't executed yet at that point) to prevent
+# it. Bit us 2026-09-10: reordering imports here alone did NOT fix the
+# original crash; running as a plain script instead does, matching how the
+# working train_agent.py entry point runs (plain script, not -m) -- so we
+# manually put the repo root on sys.path the way `-m` would have, since a
+# plain `python path/to/file.py` puts the FILE's own directory there instead.
+sys.path.insert(0, os.getcwd())
+
 from utils.hydra_utils import get_args, parse_sim_params, parse_task, set_np_formatting, set_seed
 from tv_tasks.tasks.base1.predtac_utils import crop_boxes_for_env
 
