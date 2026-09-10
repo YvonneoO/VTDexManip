@@ -21,12 +21,19 @@ import os
 
 os.environ.setdefault("PREDTAC_RUN_ID", "smoke_test")
 
+# IsaacGym must be imported before torch (its own gymdeps guard enforces this
+# -- see isaacgym/python/isaacgym/gymdeps.py). hydra_utils.parse_task() pulls
+# in tv_tasks.tasks -> isaacgym.torch_utils transitively, so these two
+# project imports MUST come before `import torch` below. Bit us 2026-09-10:
+# the original import order here (torch before hydra_utils) crashed every
+# single invocation with "PyTorch was imported before isaacgym modules" --
+# this smoke test had never actually run once until this was fixed.
+from utils.hydra_utils import get_args, parse_sim_params, parse_task, set_np_formatting, set_seed
+from tv_tasks.tasks.base1.predtac_utils import crop_boxes_for_env
+
 import cv2
 import numpy as np
 import torch
-
-from utils.hydra_utils import get_args, parse_sim_params, parse_task, set_np_formatting, set_seed
-from tv_tasks.tasks.base1.predtac_utils import crop_boxes_for_env
 
 
 def draw_boxes(frame_bgr, sides):
