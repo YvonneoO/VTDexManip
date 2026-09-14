@@ -71,17 +71,21 @@ class PredTacClient:
     def poll_blocking(self, timeout_s=15.0, poll_interval_s=0.02):
         """Blocking variant of poll() -- see the DexterousHands-side
         predtac_client.py's identical method for the full rationale (this
-        file is kept in sync with that one). Spins until staleness_ticks()
-        would read 0, falling back to whatever's freshest (with a printed
-        warning) if timeout_s elapses first."""
+        file is kept in sync with that one). Waits for ANY response newer
+        than what was known at call time, NOT an exact match on the tick
+        just submitted -- the server's own frame_interval decimation means
+        an exact-tick response may never arrive, which the first version of
+        this method got wrong (always burned the full timeout, falling back
+        one tick short every single call). Falls back to whatever's
+        freshest and prints a warning if timeout_s elapses first."""
         if self._tick == 0:
             return self.continuous, self.binary
-        target_tick = self._tick - 1
+        seen_before = self.last_tick_seen
         deadline = time.time() + timeout_s
-        while self.last_tick_seen < target_tick:
+        while self.last_tick_seen <= seen_before:
             if time.time() > deadline:
-                print(f"[predtac][blocking] timeout after {timeout_s}s waiting for tick "
-                      f"{target_tick} (last_tick_seen={self.last_tick_seen}) -- "
+                print(f"[predtac][blocking] timeout after {timeout_s}s waiting for a response "
+                      f"newer than tick {seen_before} (submitted tick={self._tick - 1}) -- "
                       f"falling back to stale value", flush=True)
                 break
             time.sleep(poll_interval_s)
