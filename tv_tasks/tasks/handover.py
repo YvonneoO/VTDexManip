@@ -441,6 +441,30 @@ class HandOver(ShadowHandBase):
         # regardless of whether the policy's own observation sees them, so this
         # must always run; only the *concatenation into base_state* is stripped.
         object_state = self.compute_object_state(set_goal=True)
+
+        # Diagnostic added 2026-09-14: policy.py's ActorCriticT diagnostic
+        # caught NaN in the 338-dim "state" input (154/2704 values, tac
+        # channel completely clean) but couldn't say which HALF of state --
+        # robot_state (hand dof pos/vel, this env's own proprioception) or
+        # object_state (object/goal pose, sourced from root_state_tensor,
+        # i.e. real physics simulation state) -- carried it. Checking here,
+        # before concatenation/clamping (torch.clamp does NOT sanitize NaN,
+        # it only bounds finite values), and per-env so a divergent episode
+        # can be pinpointed.
+        for _name, _t in (("robot_state", robot_state), ("object_state", object_state)):
+            _nan_envs = torch.isnan(_t).any(dim=1).nonzero(as_tuple=True)[0]
+            if _nan_envs.numel() > 0:
+                print(f"[predtac][diag][obs] {_name} has NaN in envs {_nan_envs.tolist()} "
+                      f"(progress_buf={[int(self.progress_buf[e]) for e in _nan_envs.tolist()]})", flush=True)
+                if _name == "object_state":
+                    for _sub_name, _sub_t in (
+                        ("object_pos", self.object_pos), ("object_rot", self.object_rot),
+                        ("object_linvel", self.object_linvel), ("object_angvel", self.object_angvel),
+                        ("goal_pos", self.goal_pos), ("goal_rot", self.goal_rot),
+                    ):
+                        _sub_nan_envs = torch.isnan(_sub_t).any(dim=1).nonzero(as_tuple=True)[0]
+                        if _sub_nan_envs.numel() > 0:
+                            print(f"[predtac][diag][obs]   {_sub_name} nan envs: {_sub_nan_envs.tolist()}", flush=True)
         if self.strip_privileged_obj_state:
             # PPO true P-only arm (handover-base_ponly): unlike every other task in
             # this ablation, handover's own shipped 'base' bakes privileged object
