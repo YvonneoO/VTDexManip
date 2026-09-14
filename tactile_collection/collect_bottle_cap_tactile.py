@@ -81,6 +81,16 @@ def save_episode(out_dir, episode_id, buf):
         "pressure_unit": "Pa", "force_unit": "N", "area_unit": "m^2",
         "layout": "EgoTouch-21x21-217-taxels-single-hand",
         "num_frames": np.asarray(len(buf["rgb_frames"]), dtype=np.int32),
+        # Native-resolution ground truth alongside the 217-taxel-mapped grid
+        # above: raw per-anatomical-link rigid contact force [N], at the
+        # sim's own resolution (num_links, not artificially resampled to
+        # 217 -- the contact data doesn't actually support that much
+        # spatial resolution). For a sim-finetune run that wants to
+        # supervise at native link resolution (same output dim, but unique
+        # GT/pred values = num_links) rather than the 217-taxel-smoothed
+        # target.
+        "raw_per_link_force_n": np.asarray(buf["raw_per_link_force_n"], dtype=np.float32),
+        "raw_link_names": np.asarray(buf["raw_link_names"]),
     }
     np.savez_compressed(os.path.join(ep_dir, "pressure_grids.npz"), **pressure)
 
@@ -106,7 +116,26 @@ def new_buf():
         "dof_pos": [], "object_pose": [], "actions": [], "reward": [], "done": [],
         "native_success": [], "camera_eye": None, "camera_lookat": None,
         "valid_mask": None, "taxel_area_m2": None,
+        "raw_per_link_force_n": [], "raw_link_names": None,
     }
+
+
+def existing_episode_count(out_dir):
+    """Scans <out_dir>/successful_episodes/ for episode_NNNNNN dirs already on
+    disk from a previous (possibly timed-out) session, so a short-walltime
+    session can resume numbering/counting instead of starting back at 0 and
+    overwriting what's already collected."""
+    root = os.path.join(out_dir, "successful_episodes")
+    if not os.path.isdir(root):
+        return 0
+    ids = []
+    for name in os.listdir(root):
+        if name.startswith("episode_"):
+            try:
+                ids.append(int(name[len("episode_"):]))
+            except ValueError:
+                continue
+    return (max(ids) + 1) if ids else 0
 
 
 def main():
@@ -139,6 +168,10 @@ def main():
         EgoTouchTaxelMapper(task.gym, env_ptr, "hand", "right", mapping_path)
         for env_ptr in task.envs
     ]
+    # Canonical fixed order for the raw per-link array -- same 17 anatomical
+    # groups every env's mapper builds (see egotouch_taxels.py's _layout()),
+    # sorted once so every episode's raw_per_link_force_n column order matches.
+    link_names = sorted(mappers[0].groups.keys())
 
     sarl = process_sarl(args, env, args.models, args.logger_dir)
     print("Loading model from {}".format(args.resume_model), flush=True)
@@ -146,8 +179,13 @@ def main():
 
     obs = env.reset()
     bufs = [new_buf() for _ in range(num_envs)]
-    total_successes = 0
-    episode_id = 0
+    # Resume across short-walltime sessions: pick up numbering/counting from
+    # whatever's already on disk instead of starting at 0 and overwriting it.
+    episode_id = existing_episode_count(out_dir)
+    total_successes = episode_id
+    if episode_id > 0:
+        print("[collect] resuming: {} episodes already on disk, continuing from episode_{:06d}".format(
+            episode_id, episode_id), flush=True)
     step = 0
 
     while total_successes < target_successes and step < max_steps:
@@ -183,6 +221,10 @@ def main():
             buf["mapped_force_fraction"].append(diag["mapped_force_fraction"])
             buf["valid_mask"] = mappers[i].valid_mask
             buf["taxel_area_m2"] = mappers[i].taxel_area_m2
+            per_body = diag["per_body_force_n"]
+            buf["raw_per_link_force_n"].append(
+                np.asarray([per_body.get(name, 0.0) for name in link_names], dtype=np.float32))
+            buf["raw_link_names"] = link_names
             object_row = int(task.object_indices[i].item())
             buf["dof_pos"].append(env0(task.dof_pos, i))
             buf["object_pose"].append(env0(task.root_state_tensor, object_row))

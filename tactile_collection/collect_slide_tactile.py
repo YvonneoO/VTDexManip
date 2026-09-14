@@ -89,6 +89,10 @@ def save_episode(out_dir, episode_id, buf):
         "pressure_unit": "Pa", "force_unit": "N", "area_unit": "m^2",
         "layout": "EgoTouch-21x21-217-taxels-single-hand",
         "num_frames": np.asarray(len(buf["rgb_frames"]), dtype=np.int32),
+        # See collect_bottle_cap_tactile.py's identical field for the full
+        # rationale: native-link-resolution GT alongside the 217-taxel grid.
+        "raw_per_link_force_n": np.asarray(buf["raw_per_link_force_n"], dtype=np.float32),
+        "raw_link_names": np.asarray(buf["raw_link_names"]),
     }
     np.savez_compressed(os.path.join(ep_dir, "pressure_grids.npz"), **pressure)
 
@@ -114,7 +118,25 @@ def new_buf():
         "dof_pos": [], "object_pose": [], "actions": [], "reward": [], "done": [],
         "native_success": [], "camera_eye": None, "camera_lookat": None,
         "valid_mask": None, "taxel_area_m2": None,
+        "raw_per_link_force_n": [], "raw_link_names": None,
     }
+
+
+def existing_episode_count(out_dir):
+    """See collect_bottle_cap_tactile.py's identical function for the
+    rationale -- lets a short-walltime session resume instead of
+    overwriting what a previous session already collected."""
+    root = os.path.join(out_dir, "successful_episodes")
+    if not os.path.isdir(root):
+        return 0
+    ids = []
+    for name in os.listdir(root):
+        if name.startswith("episode_"):
+            try:
+                ids.append(int(name[len("episode_"):]))
+            except ValueError:
+                continue
+    return (max(ids) + 1) if ids else 0
 
 
 def main():
@@ -147,6 +169,7 @@ def main():
         EgoTouchTaxelMapper(task.gym, env_ptr, "hand", "right", mapping_path)
         for env_ptr in task.envs
     ]
+    link_names = sorted(mappers[0].groups.keys())
 
     sarl = process_sarl(args, env, args.models, args.logger_dir)
     print("Loading model from {}".format(args.resume_model), flush=True)
@@ -154,8 +177,11 @@ def main():
 
     obs = env.reset()
     bufs = [new_buf() for _ in range(num_envs)]
-    total_successes = 0
-    episode_id = 0
+    episode_id = existing_episode_count(out_dir)
+    total_successes = episode_id
+    if episode_id > 0:
+        print("[collect] resuming: {} episodes already on disk, continuing from episode_{:06d}".format(
+            episode_id, episode_id), flush=True)
     step = 0
 
     while total_successes < target_successes and step < max_steps:
@@ -190,6 +216,10 @@ def main():
             buf["mapped_force_fraction"].append(diag["mapped_force_fraction"])
             buf["valid_mask"] = mappers[i].valid_mask
             buf["taxel_area_m2"] = mappers[i].taxel_area_m2
+            per_body = diag["per_body_force_n"]
+            buf["raw_per_link_force_n"].append(
+                np.asarray([per_body.get(name, 0.0) for name in link_names], dtype=np.float32))
+            buf["raw_link_names"] = link_names
             object_row = int(task.object_indices[i].item())
             # slide.py never aliases self.dof_pos (unlike bottle_cap.py) -- reads
             # self.shadow_hand_dof_pos directly everywhere. task.dof_pos does not
