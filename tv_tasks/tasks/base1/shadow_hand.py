@@ -68,6 +68,17 @@ class ShadowHandBase(BaseTask):
         # readings during a real rollout. 0.1 matches bidexhands'
         # tactile_extra_obs_scale convention.
         self.tac_gt_obs_scale = 0.1
+        # Pred-Tac's continuous channel (compute_predtac_obs) had NO scale at
+        # all -- confirmed 2026-09-14 by reading handover.py directly: unlike
+        # touch_force_obs_gt above, touch_force_obs_predtac is concatenated
+        # raw. Same underlying model/output as bidexhands' predtac_continuous_
+        # obs_scale=20.0 fix (max-pooled 17-link predicted pressure, same
+        # checkpoint), so reusing that value as a starting point -- but NOT
+        # yet empirically re-validated against VTDexManip's own value range
+        # (no diag_tactile_scale.py-style percentile check has been run here
+        # the way it was for bidexhands' predtac_server.py diagnostic prints).
+        # Treat as a reasonable prior, not a confirmed-correct number.
+        self.predtac_continuous_obs_scale = 20.0
 
         self.startPositionNoise = self.cfg["env"]["startPositionNoise"]
         print(f"startPositionNoise --> {self.startPositionNoise}")

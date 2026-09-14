@@ -660,7 +660,13 @@ class HandOver(ShadowHandBase):
         self.gym.end_access_image_tensors(self.sim)
 
         self._predtac_client.submit(frames, sides_all_envs)
-        continuous_np, binary_np = self._predtac_client.poll()  # each (num_envs, 2, 17), slot 0=left, 1=right
+        # PREDTAC_BLOCKING=1 trades sim throughput for near-zero staleness --
+        # see bidexhands' shadow_hand_pen.py's identical block for the full
+        # rationale (kept in sync across both frameworks).
+        if os.environ.get("PREDTAC_BLOCKING", "0") == "1":
+            continuous_np, binary_np = self._predtac_client.poll_blocking()
+        else:
+            continuous_np, binary_np = self._predtac_client.poll()  # each (num_envs, 2, 17), slot 0=left, 1=right
 
         # Temporary staleness diagnostic (2026-09-10): mirrors the same
         # instrumentation added to bidexhands' shadow_hand_pen.py/
@@ -670,7 +676,11 @@ class HandOver(ShadowHandBase):
             print(f"[predtac][staleness] client_tick={self._predtac_client._tick} "
                   f"stale_ticks={_stale}", flush=True)
 
-        continuous = torch.from_numpy(continuous_np).to(self.device)
+        # See base1/shadow_hand.py's predtac_continuous_obs_scale for the
+        # rationale -- this channel had no scale at all before 2026-09-14,
+        # the same unscaled-tactile-channel bug pattern found (and fixed)
+        # in bidexhands' Pen/Scissors. binary is already 0/1, no scale needed.
+        continuous = self.predtac_continuous_obs_scale * torch.from_numpy(continuous_np).to(self.device)
         binary = torch.from_numpy(binary_np).to(self.device)
         # "right" hand (self.fingertip_pos) first, "left" (a_fingertip_pos) second --
         # matches compute_robot_state's own robot_state-then-a_robot_state order.

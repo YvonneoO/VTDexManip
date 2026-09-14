@@ -10,6 +10,8 @@ DexterousHands-side client. handover.py's own crop_boxes_for_env (in
 predtac_utils.py) already returns sides dicts keyed "left"/"right", so this
 client is the one place that commits to a fixed wire-format slot order.
 """
+import time
+
 import numpy as np
 
 from tv_tasks.tasks.base1 import predtac_ipc
@@ -65,3 +67,23 @@ class PredTacClient:
         if self.last_tick_seen < 0:
             return None
         return (self._tick - 1) - self.last_tick_seen
+
+    def poll_blocking(self, timeout_s=15.0, poll_interval_s=0.02):
+        """Blocking variant of poll() -- see the DexterousHands-side
+        predtac_client.py's identical method for the full rationale (this
+        file is kept in sync with that one). Spins until staleness_ticks()
+        would read 0, falling back to whatever's freshest (with a printed
+        warning) if timeout_s elapses first."""
+        if self._tick == 0:
+            return self.continuous, self.binary
+        target_tick = self._tick - 1
+        deadline = time.time() + timeout_s
+        while self.last_tick_seen < target_tick:
+            if time.time() > deadline:
+                print(f"[predtac][blocking] timeout after {timeout_s}s waiting for tick "
+                      f"{target_tick} (last_tick_seen={self.last_tick_seen}) -- "
+                      f"falling back to stale value", flush=True)
+                break
+            time.sleep(poll_interval_s)
+            self.poll()
+        return self.continuous, self.binary
