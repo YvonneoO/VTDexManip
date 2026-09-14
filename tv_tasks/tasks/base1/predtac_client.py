@@ -52,8 +52,14 @@ class PredTacClient:
         resp = predtac_ipc.read_response(self.run_id)
         if resp is not None and resp["tick"] > self.last_tick_seen:
             self.last_tick_seen = resp["tick"]
-            self.continuous = resp["continuous"]
-            self.binary = resp["binary"]
+            # Defensive: see the DexterousHands-side predtac_client.py's
+            # identical guard for the full rationale -- found live on this
+            # framework's own Handover run (job 539404, iteration 267/4400),
+            # a NaN-in-action-distribution crash consistent with an
+            # unsanitized NaN tactile reading (e.g. a degenerate no-hand
+            # frame) leaking through into the policy.
+            self.continuous = np.nan_to_num(resp["continuous"], nan=0.0)
+            self.binary = np.nan_to_num(resp["binary"], nan=0.0)
         return self.continuous, self.binary
 
     def staleness_ticks(self):
