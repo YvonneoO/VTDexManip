@@ -1257,6 +1257,32 @@ class ActorCriticT(nn.Module):
     def forward(self):
         raise NotImplementedError
 
+    def _diag_check_nan(self, tag, state, tac, actions_mean):
+        """Diagnostic added 2026-09-14 while chasing a recurring 'invalid
+        values in MultivariateNormal loc' crash on Handover's PredTac arm
+        (found at iteration ~18, then ~267 after a scale fix, then again
+        right after a --resume_model -- 3 different points, same error
+        signature, cause not yet isolated). Prints detailed stats the FIRST
+        moment NaN/Inf/an extreme magnitude appears anywhere in this forward
+        pass -- state (proprio+obj_state), tac (PredTac's continuous+binary
+        channel), or the actor's own output -- so the log shows exactly
+        which piece went bad first, instead of only learning about it after
+        MultivariateNormal's ValueError fires downstream with no context.
+        Deliberately silent (near-zero per-step cost, no log spam) unless
+        something is actually anomalous."""
+        def _bad(t):
+            return bool(torch.isnan(t).any() or torch.isinf(t).any())
+        problems = [name for name, t in (("state", state), ("tac", tac), ("actions_mean", actions_mean)) if _bad(t)]
+        if not problems and actions_mean.abs().max().item() < 1e4:
+            return
+        if not problems:
+            problems = ["actions_mean magnitude > 1e4"]
+        print(f"[predtac][diag] {tag}: anomaly in {problems}", flush=True)
+        for name, t in (("state", state), ("tac", tac), ("actions_mean", actions_mean)):
+            print(f"[predtac][diag]   {name}: shape={tuple(t.shape)} "
+                  f"min={t.min().item():.4g} max={t.max().item():.4g} "
+                  f"nan={int(torch.isnan(t).sum())} inf={int(torch.isinf(t).sum())}", flush=True)
+
     @torch.no_grad()
     def act(self, observations):
         self.obs_enc.eval()
@@ -1268,6 +1294,7 @@ class ActorCriticT(nn.Module):
 
 
         actions_mean = self.actor(joint_emb)
+        self._diag_check_nan("act", state, tac, actions_mean)
 
         covariance = torch.diag(self.log_std.exp() * self.log_std.exp())
         distribution = MultivariateNormal(actions_mean, scale_tril=covariance)
@@ -1305,6 +1332,7 @@ class ActorCriticT(nn.Module):
         obs_emb = self.obs_enc(obs_features)
         joint_emb = torch.cat([state_emb, obs_emb], dim=1)
         actions_mean = self.actor(joint_emb)
+        self._diag_check_nan("evaluate", state, obs_features, actions_mean)
 
         covariance = torch.diag(self.log_std.exp() * self.log_std.exp())
         distribution = MultivariateNormal(actions_mean, scale_tril=covariance)
