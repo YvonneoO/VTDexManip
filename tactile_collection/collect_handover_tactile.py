@@ -118,6 +118,12 @@ def save_episode(out_dir, episode_id, buf):
                              "observation -- only left (\"another_hand\") feeds compute_sensor_obs(); "
                              "right is recorded anyway for a complete record",
         "num_frames": np.asarray(len(buf["rgb_frames"]), dtype=np.int32),
+        # See collect_bottle_cap_tactile.py's identical field for the full
+        # rationale: native-link-resolution GT alongside the 217-taxel grid,
+        # for both hands.
+        "left_raw_per_link_force_n": np.asarray(buf["left_raw_per_link_force_n"], dtype=np.float32),
+        "right_raw_per_link_force_n": np.asarray(buf["right_raw_per_link_force_n"], dtype=np.float32),
+        "raw_link_names": np.asarray(buf["raw_link_names"]),
     }
     np.savez_compressed(os.path.join(ep_dir, "pressure_grids.npz"), **pressure)
 
@@ -147,7 +153,25 @@ def new_buf():
         "actions": [], "reward": [], "done": [],
         "native_success": [], "camera_eye": None, "camera_lookat": None,
         "valid_mask": None, "taxel_area_m2": None,
+        "left_raw_per_link_force_n": [], "right_raw_per_link_force_n": [], "raw_link_names": None,
     }
+
+
+def existing_episode_count(out_dir):
+    """See collect_bottle_cap_tactile.py's identical function for the
+    rationale -- lets a short-walltime session resume instead of
+    overwriting what a previous session already collected."""
+    root = os.path.join(out_dir, "successful_episodes")
+    if not os.path.isdir(root):
+        return 0
+    ids = []
+    for name in os.listdir(root):
+        if name.startswith("episode_"):
+            try:
+                ids.append(int(name[len("episode_"):]))
+            except ValueError:
+                continue
+    return (max(ids) + 1) if ids else 0
 
 
 def main():
@@ -185,6 +209,7 @@ def main():
         EgoTouchTaxelMapper(task.gym, env_ptr, "another_hand", "left", left_mapping)
         for env_ptr in task.envs
     ]
+    link_names = sorted(right_mappers[0].groups.keys())
 
     sarl = process_sarl(args, env, args.models, args.logger_dir)
     print("Loading model from {}".format(args.resume_model), flush=True)
@@ -192,8 +217,11 @@ def main():
 
     obs = env.reset()
     bufs = [new_buf() for _ in range(num_envs)]
-    total_successes = 0
-    episode_id = 0
+    episode_id = existing_episode_count(out_dir)
+    total_successes = episode_id
+    if episode_id > 0:
+        print("[collect] resuming: {} episodes already on disk, continuing from episode_{:06d}".format(
+            episode_id, episode_id), flush=True)
     step = 0
 
     while total_successes < target_successes and step < max_steps:
@@ -224,6 +252,13 @@ def main():
             buf["left_contact_count"].append(left_diag["contact_count"])
             buf["valid_mask"] = left_mappers[i].valid_mask
             buf["taxel_area_m2"] = left_mappers[i].taxel_area_m2
+            right_per_body = right_diag["per_body_force_n"]
+            left_per_body = left_diag["per_body_force_n"]
+            buf["right_raw_per_link_force_n"].append(
+                np.asarray([right_per_body.get(name, 0.0) for name in link_names], dtype=np.float32))
+            buf["left_raw_per_link_force_n"].append(
+                np.asarray([left_per_body.get(name, 0.0) for name in link_names], dtype=np.float32))
+            buf["raw_link_names"] = link_names
             object_row = int(task.object_indices[i].item())
             buf["dof_pos"].append(env0(task.shadow_hand_dof_pos, i))
             buf["another_dof_pos"].append(env0(task.shadow_hand_another_dof_pos, i))
