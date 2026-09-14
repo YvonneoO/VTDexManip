@@ -113,3 +113,19 @@ def read_response(run_id):
             }
     except (OSError, ValueError, EOFError):
         return None
+
+
+def reset_run(run_id):
+    """Deletes any request/response (+ stray .tmp) files left over from a
+    PREVIOUS process that used this exact run_id -- see the DexterousHands-
+    side predtac_ipc.py's identical function for the full rationale (a
+    leftover response.npz from an earlier session can permanently poison a
+    fresh client by handing it a bogus high-water-mark tick, found live
+    2026-09-14). Kept in sync with that file."""
+    d = run_dir(run_id)
+    for name in ("request.npz", "response.npz", "request.npz.tmp", "response.npz.tmp"):
+        path = os.path.join(d, name)
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass

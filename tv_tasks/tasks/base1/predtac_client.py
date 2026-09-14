@@ -28,6 +28,10 @@ class PredTacClient:
         self.continuous = np.zeros((num_envs, 2, num_links), dtype=np.float32)
         self.binary = np.zeros((num_envs, 2, num_links), dtype=np.float32)
         self._tick = 0
+        # See the DexterousHands-side predtac_client.py's identical guard
+        # for the full rationale (a stale leftover response from a reused
+        # run_id can permanently freeze a fresh session on one old frame).
+        predtac_ipc.reset_run(run_id)
 
     def submit(self, frames_uint8, sides_all_envs):
         """frames_uint8: (num_envs,H,W,3) uint8. sides_all_envs: list of
