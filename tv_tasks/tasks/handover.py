@@ -369,6 +369,36 @@ class HandOver(ShadowHandBase):
             if self.total_resets > 0:
                 print("Post-Reset average consecutive successes = {:.1f}".format(self.total_successes/self.total_resets))
 
+        # Safety net added 2026-09-14: a rare PhysX solver divergence for a
+        # single env (confirmed live on PredTac's Handover training -- env 7,
+        # progress_buf=13, robot_state AND object_state both NaN, the
+        # tactile channel completely clean -- a genuine physics blowup, not
+        # a code bug; see the [predtac][diag] instrumentation above
+        # compute_observations) can otherwise crash the ENTIRE training run:
+        # MultivariateNormal validates the whole batch at once, so ONE bad
+        # env's NaN takes down all num_envs. object_pos/object_rot/goal_pos/
+        # goal_rot are side-effect attributes compute_hand_reward just read
+        # again above, so sanitizing HERE -- after everything upstream has
+        # already run, on the exact buffers vec_task.py's step() hands back
+        # to the PPO rollout (obs_states_buf, rew_buf) -- catches corruption
+        # regardless of which raw sim tensor (dof_state, root_state_tensor,
+        # rigid_body_states) was the original source, rather than chasing
+        # each one individually. Forces a real reset next step via the
+        # existing pre_physics_step -> reset_idx flow (this ADDS to
+        # self.reset_buf, it does not conflict with this method's own
+        # self.reset_buf[:] assignment above -- that already ran).
+        bad_envs = (torch.isnan(self.obs_states_buf).any(dim=1) |
+                    torch.isinf(self.obs_states_buf).any(dim=1) |
+                    torch.isnan(self.rew_buf) | torch.isinf(self.rew_buf)).nonzero(as_tuple=True)[0]
+        if bad_envs.numel() > 0:
+            print(f"[predtac][safety] sanitizing NaN/Inf physics state in envs {bad_envs.tolist()} "
+                  f"(progress_buf={[int(self.progress_buf[e]) for e in bad_envs.tolist()]}) -- "
+                  f"forcing reset next step", flush=True)
+            self.obs_states_buf[bad_envs] = torch.nan_to_num(
+                self.obs_states_buf[bad_envs], nan=0.0, posinf=0.0, neginf=0.0)
+            self.rew_buf[bad_envs] = 0.0
+            self.reset_buf[bad_envs] = 1
+
     def compute_hand_reward(self,
                              rew_buf, reset_buf, reset_goal_buf, progress_buf, successes, consecutive_successes,
                              max_episode_length: float,object_dof_pos, object_dof_vel, object_pos, object_rot, target_pos, target_rot,
