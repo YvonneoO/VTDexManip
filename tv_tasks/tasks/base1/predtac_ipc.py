@@ -115,13 +115,40 @@ def read_response(run_id):
         return None
 
 
+def ready_marker_path(run_id):
+    return os.path.join(run_dir(run_id), "server_ready.marker")
+
+
+def mark_server_ready(run_id):
+    """Written by predtac_server.py (the shared, simulator-agnostic server
+    process) once it's about to enter its serving loop -- see the
+    DexterousHands-side predtac_ipc.py's identical function for the full
+    rationale (a training/eval launcher racing ahead of a still-loading
+    server bakes in a PERMANENT staleness offset under the default async
+    client, since it always serves whatever's freshest rather than catching
+    up a startup backlog -- found live 2026-09-14 on Handover's async
+    training, staleness past 600 ticks and still climbing). Kept in sync
+    with that file."""
+    with open(ready_marker_path(run_id), "w") as f:
+        f.write("ready")
+
+
+def is_server_ready(run_id):
+    return os.path.exists(ready_marker_path(run_id))
+
+
 def reset_run(run_id):
     """Deletes any request/response (+ stray .tmp) files left over from a
     PREVIOUS process that used this exact run_id -- see the DexterousHands-
     side predtac_ipc.py's identical function for the full rationale (a
     leftover response.npz from an earlier session can permanently poison a
     fresh client by handing it a bogus high-water-mark tick, found live
-    2026-09-14). Kept in sync with that file."""
+    2026-09-14). Kept in sync with that file.
+
+    Deliberately does NOT touch the ready marker -- that belongs to the
+    SERVER's lifecycle (see server_reset_run), not the client's; a client
+    relaunch against an already-running, already-ready server must not
+    erase evidence of that readiness."""
     d = run_dir(run_id)
     for name in ("request.npz", "response.npz", "request.npz.tmp", "response.npz.tmp"):
         path = os.path.join(d, name)
@@ -129,3 +156,14 @@ def reset_run(run_id):
             os.remove(path)
         except FileNotFoundError:
             pass
+
+
+def server_reset_run(run_id):
+    """Like reset_run, but also clears the ready marker -- call ONLY from
+    predtac_server.py's own startup. Kept in sync with the DexterousHands-
+    side predtac_ipc.py's identical function."""
+    reset_run(run_id)
+    try:
+        os.remove(ready_marker_path(run_id))
+    except FileNotFoundError:
+        pass
