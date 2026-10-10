@@ -37,9 +37,31 @@ class PredTacObsMixin:
         self._predtac_bin_scale = float(os.environ.get("PREDTAC_BIN_SCALE", "3.0"))
         self._pq_hist, self._pq_n = [], 0
         self._pq_reset()
+        self._predtac_apply_hand_color()
         print(f"[PredTac] {self._predtac_n_ready}/{self.num_envs} static cameras {self.cam_w}x{self.cam_h}, run_id={run_id}, "
               f"capture_every={self._predtac_capture_every}, scales cont={self._predtac_cont_scale} bin={self._predtac_bin_scale}",
               flush=True)
+
+    def _predtac_apply_hand_color(self):
+        """The predictor was fine-tuned on frames from the data collectors (collect_{slide,bottle_cap,handover}_tactile.py), which
+        repaint every hand body (0.42, 0.52, 0.56) before rendering; the task envs themselves render near-black hands (handover
+        also red sensor blocks). Same repaint here, otherwise the online input is out of distribution (predictions saturate).
+        PREDTAC_HAND_COLOR=r,g,b overrides, "none" disables."""
+        spec = os.environ.get("PREDTAC_HAND_COLOR", "0.42,0.52,0.56").strip().lower()
+        if spec in ("", "none", "off"):
+            return
+        from isaacgym import gymapi
+        rgb = [float(x) for x in spec.split(",")]
+        n_act = 0
+        for env_ptr in self.envs:
+            for name in ("hand", "another_hand"):
+                actor = self.gym.find_actor_handle(env_ptr, name)
+                if actor is None or actor < 0:
+                    continue
+                for b in range(self.gym.get_actor_rigid_body_count(env_ptr, actor)):
+                    self.gym.set_rigid_body_color(env_ptr, actor, b, gymapi.MESH_VISUAL, gymapi.Vec3(*rgb))
+                n_act += 1
+        print(f"[PredTac] hand bodies repainted rgb={rgb} actors={n_act}", flush=True)
 
     def compute_predtac_obs(self):
         from tv_tasks.tasks.base1.predtac_utils import crop_boxes_for_env

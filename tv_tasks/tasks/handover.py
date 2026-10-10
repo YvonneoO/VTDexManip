@@ -673,6 +673,7 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
                 np.asarray(self.gym.get_camera_proj_matrix(self.sim, self.envs[i], camera_handle), dtype=np.float64))
         self._predtac_num_active_envs = n_ready
         self._predtac_client = PredTacClient(run_id, self.num_envs)
+        self._predtac_apply_hand_color()   # collector hand colour (mixin), see base/predtac_obs.py
         print(f"[PredTac] initialized {n_ready}/{self.num_envs} static cameras, run_id={run_id}, "
               f"size={self.cam_w}x{self.cam_h}", flush=True)
 
