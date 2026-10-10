@@ -102,7 +102,7 @@ class PredTacObsMixin:
         if self._predtac_client._tick % 25 == 0 and self._predtac_step % self._predtac_capture_every == 0:
             print(f"[predtac][staleness] client_tick={self._predtac_client._tick} stale_ticks={stale}", flush=True)
         if os.environ.get("PREDTAC_QUALITY_LOG", "0") == "1":
-            self._pq_update(binary[:, 1, :], stale)
+            self._pq_update(binary[:, 1, :], stale, cont_right=cont[:, 1, :])
         c = torch.from_numpy(np.nan_to_num(cont[:, 1, :], nan=0.0)).to(self.device)
         b = torch.from_numpy(np.nan_to_num(binary[:, 1, :], nan=0.0)).to(self.device)
         return torch.cat([self._predtac_cont_scale * c, self._predtac_bin_scale * b], dim=-1)   # (N, 34)
@@ -112,13 +112,25 @@ class PredTacObsMixin:
         K = self._PQ_K + 1
         self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0, npl=0.0, ngl=0.0)
 
-    def _pq_update(self, bin_right, stale, contact_idx=None):
+    def _pq_update(self, bin_right, stale, contact_idx=None, cont_right=None):
         if not hasattr(self, "_pq"):
             self._pq_hist = []
             self._pq_reset()
         idx = contact_idx if contact_idx is not None else self.hand_contact_idx
         contact = self.contact_force[idx].view(self.num_envs, self.num_force_sensors, 3)
-        gt_links = (torch.norm(contact, p=2, dim=2) > 0.01)
+        force_n = torch.norm(contact, p=2, dim=2)                                         # (N, S) per force-sensor body
+        gt_links = (force_n > 0.01)
+        npz = os.environ.get("PREDTAC_QUALITY_NPZ")
+        if npz and cont_right is not None:
+            # raw per-tick arrays for offline calibration (threshold / link-order checks): predicted continuous + binary per link
+            # vs GT per-sensor force norm, same tick; flushed every 100 updates
+            if not hasattr(self, "_pq_raw"):
+                self._pq_raw = dict(cont=[], binary=[], force=[])
+            self._pq_raw["cont"].append(np.asarray(cont_right, np.float32).copy())
+            self._pq_raw["binary"].append(np.asarray(bin_right, np.float32).copy())
+            self._pq_raw["force"].append(force_n.detach().cpu().numpy().astype(np.float32))
+            if len(self._pq_raw["cont"]) % 100 == 0:
+                np.savez(npz, **{k: np.stack(v) for k, v in self._pq_raw.items()})   # (ticks, N, 17|S)
         gt = gt_links.any(dim=1).cpu().numpy()                                            # (N,) any contact on the hand
         n_gt_links = gt_links.sum(dim=1).float().mean().item()
         self._pq_hist.append(gt)
