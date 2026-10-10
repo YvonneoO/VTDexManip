@@ -112,7 +112,8 @@ class PredTacObsMixin:
             tpr = q["tp"] / np.maximum(q["pos"], 1); fpr = q["fp"] / np.maximum(q["neg"], 1)
             # balanced agreement per lag: higher = prediction at t matches GT contact at t-k better
             bal = 0.5 * (tpr + (1 - fpr)); best = int(np.argmax(bal))
-            print(f"[predtac][quality] step={self._predtac_step} stale_ticks={stale} gt_pos={q['gt'] / q['n']:.3f} "
+            step = getattr(self, "_predtac_step", self._predtac_client._tick)   # handover keeps its own capture path
+            print(f"[predtac][quality] step={step} stale_ticks={stale} gt_pos={q['gt'] / q['n']:.3f} "
                   f"pred_pos={q['pr'] / q['n']:.3f} | k=0 tpr={tpr[0]:.3f} fpr={fpr[0]:.3f} | best_lag={best} "
                   f"tpr={tpr[best]:.3f} fpr={fpr[best]:.3f} | bal@lag: " +
                   " ".join(f"{k}:{bal[k]:.2f}" for k in range(len(bal))), flush=True)
