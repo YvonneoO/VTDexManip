@@ -58,9 +58,9 @@ def _hand_box_from_points(points_world_local, env_origin, view_matrix, proj_matr
     import os
     # fingertip points alone undercover the hand (palm + wrist are what a SAM3 hand mask contains): padding is env-tunable
     if pad_frac is None:
-        pad_frac = float(os.environ.get("PREDTAC_BOX_PAD", "0.60"))
+        pad_frac = float(os.environ.get("PREDTAC_BOX_PAD", "0.25"))
     if min_pad_px is None:
-        min_pad_px = float(os.environ.get("PREDTAC_BOX_MIN_PAD", "24"))
+        min_pad_px = float(os.environ.get("PREDTAC_BOX_MIN_PAD", "12"))
     pts_global = points_world_local + np.asarray(env_origin, dtype=np.float64)[None, :]
     u, v, in_front = project_world_to_pixel(pts_global, view_matrix, proj_matrix, width, height)
     if not np.any(in_front):

@@ -696,8 +696,15 @@ class HandOver(ShadowHandBase):
         self.gym.start_access_image_tensors(self.sim)
 
         env_origin_np = self.env_origin.detach().cpu().numpy()
-        right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
-        left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
+        # whole-hand body points (right actor bodies first, then the other hand's): a box that covers palm + wrist like a SAM3 mask
+        _nb = int(self.num_shadow_hand_bodies)
+        _rb = self.rigid_body_states.view(self.num_envs, -1, 13)[:, :, 0:3]
+        if _rb.shape[1] >= 2 * _nb:
+            right_pts_np = _rb[:, 0:_nb].detach().cpu().numpy()
+            left_pts_np = _rb[:, _nb:2 * _nb].detach().cpu().numpy()
+        else:                                                           # fallback: fingertips only
+            right_pts_np = self.fingertip_pos.detach().cpu().numpy()
+            left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()
 
         n_active = self._predtac_num_active_envs
         frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)

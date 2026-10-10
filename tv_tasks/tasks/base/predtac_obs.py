@@ -51,7 +51,10 @@ class PredTacObsMixin:
             self.gym.render_all_camera_sensors(self.sim)
             self.gym.start_access_image_tensors(self.sim)
             origin = self.env_origin.detach().cpu().numpy()
-            pts = self.fingertip_state[:, :, 0:3].detach().cpu().numpy()          # (N,5,3) right-hand fingertips, env-local
+            # all rigid bodies of the (right) hand actor, env-local: the box then covers palm + wrist like a SAM3 hand mask
+            # (fingertip points alone gave boxes shifted/offset by ~30% of the box size vs SAM3)
+            nb = int(self.num_shadow_hand_bodies)
+            pts = self.rigid_body_states.view(self.num_envs, -1, 13)[:, 0:nb, 0:3].detach().cpu().numpy()
             frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
             sides = []
             for i in range(self.num_envs):
