@@ -110,7 +110,7 @@ class PredTacObsMixin:
     # ---- hand-level online quality monitor -------------------------------------------------------------------------
     def _pq_reset(self):
         K = self._PQ_K + 1
-        self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0)
+        self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0, npl=0.0, ngl=0.0)
 
     def _pq_update(self, bin_right, stale, contact_idx=None):
         if not hasattr(self, "_pq"):
@@ -118,7 +118,9 @@ class PredTacObsMixin:
             self._pq_reset()
         idx = contact_idx if contact_idx is not None else self.hand_contact_idx
         contact = self.contact_force[idx].view(self.num_envs, self.num_force_sensors, 3)
-        gt = (torch.norm(contact, p=2, dim=2) > 0.01).any(dim=1).cpu().numpy()            # (N,) any contact on the right hand
+        gt_links = (torch.norm(contact, p=2, dim=2) > 0.01)
+        gt = gt_links.any(dim=1).cpu().numpy()                                            # (N,) any contact on the hand
+        n_gt_links = gt_links.sum(dim=1).float().mean().item()
         self._pq_hist.append(gt)
         self._pq_hist = self._pq_hist[-(self._PQ_K + 1):]
         pred = bin_right.max(axis=1) > 0.5                                                # (N,) predicted any-link contact
@@ -127,6 +129,7 @@ class PredTacObsMixin:
         q = self._pq
         q["n"] += 1
         q["gt"] += gt.mean(); q["pr"] += pred.mean()
+        q["npl"] += float((bin_right > 0.5).sum(axis=1).mean()); q["ngl"] += n_gt_links
         for k, g in enumerate(reversed(self._pq_hist)):
             q["pos"][k] += g.sum(); q["neg"][k] += (~g).sum()
             q["tp"][k] += (pred & g).sum(); q["fp"][k] += (pred & ~g).sum()
@@ -136,7 +139,7 @@ class PredTacObsMixin:
             bal = 0.5 * (tpr + (1 - fpr)); best = int(np.argmax(bal))
             step = getattr(self, "_predtac_step", self._predtac_client._tick)   # handover keeps its own capture path
             print(f"[predtac][quality] step={step} stale_ticks={stale} gt_pos={q['gt'] / q['n']:.3f} "
-                  f"pred_pos={q['pr'] / q['n']:.3f} | k=0 tpr={tpr[0]:.3f} fpr={fpr[0]:.3f} | best_lag={best} "
+                  f"pred_pos={q['pr'] / q['n']:.3f} pred_links={q['npl'] / q['n']:.1f} gt_links={q['ngl'] / q['n']:.1f} | k=0 tpr={tpr[0]:.3f} fpr={fpr[0]:.3f} | best_lag={best} "
                   f"tpr={tpr[best]:.3f} fpr={fpr[best]:.3f} | bal@lag: " +
                   " ".join(f"{k}:{bal[k]:.2f}" for k in range(len(bal))), flush=True)
             self._pq_reset()
