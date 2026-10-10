@@ -738,7 +738,8 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
             print(f"[predtac][staleness] client_tick={self._predtac_client._tick} "
                   f"stale_ticks={_stale}", flush=True)
         if os.environ.get("PREDTAC_QUALITY_LOG", "0") == "1":
-            self._pq_update(binary_np[:, 1, :], _stale)     # right hand: predicted channel 1 vs sim right-hand contact
+            # handover's sim exposes the OTHER (left) hand's contact sensors: predicted channel 0 vs that hand's contact
+            self._pq_update(binary_np[:, 0, :], _stale, contact_idx=self.another_hand_contact_idx)
 
         # See base1/shadow_hand.py's predtac_continuous_obs_scale for the
         # rationale -- this channel had no scale at all before 2026-09-14,
