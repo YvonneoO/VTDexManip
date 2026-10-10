@@ -1,3 +1,4 @@
+import os
 # Copyright (c) 2020, NVIDIA CORPORATION.  All rights reserved.
 # NVIDIA CORPORATION and its licensors retain all intellectual property
 # and proprietary rights in and to this software, related documentation
@@ -424,6 +425,8 @@ class BottleCap(PredTacObsMixin, ShadowHandBase):
             # magnitude (same 20 sensors as TacOnly/t_scr, not binarized).
             touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+            if os.environ.get("PREDTAC_SHADOW") == "1":
+                self.compute_predtac_obs()   # monitoring only (tactile_collection/predtac_shadow_eval.py); result discarded
 
         elif self.obs_type == 'PredTac':
             # PPO P+Pred-Tac arm: proprioception + the ONLINE tactile predictor's right-hand per-link output (34 dims)

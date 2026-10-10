@@ -569,6 +569,8 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
             # magnitude from the off hand (same sensor set TacOnly binarizes).
             touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+            if os.environ.get("PREDTAC_SHADOW") == "1":
+                self.compute_predtac_obs()   # monitoring only (tactile_collection/predtac_shadow_eval.py); result discarded
 
         elif self.obs_type == 'PredTac':
             # PPO P+Pred-Tac arm: same base_state as t_scr_gt_priv (obj_state
