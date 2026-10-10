@@ -121,6 +121,8 @@ class PredTacObsMixin:
         force_n = torch.norm(contact, p=2, dim=2)                                         # (N, S) per force-sensor body
         gt_links = (force_n > 0.01)
         npz = os.environ.get("PREDTAC_QUALITY_NPZ")
+        if not npz and os.environ.get("PREDTAC_DUMP_DIR"):
+            npz = os.path.join(os.environ["PREDTAC_DUMP_DIR"], "quality_raw.npz")
         if npz and cont_right is not None:
             # raw per-tick arrays for offline calibration (threshold / link-order checks): predicted continuous + binary per link
             # vs GT per-sensor force norm, same tick; flushed every 100 updates
@@ -130,6 +132,7 @@ class PredTacObsMixin:
             self._pq_raw["binary"].append(np.asarray(bin_right, np.float32).copy())
             self._pq_raw["force"].append(force_n.detach().cpu().numpy().astype(np.float32))
             if len(self._pq_raw["cont"]) % 100 == 0:
+                os.makedirs(os.path.dirname(os.path.abspath(npz)), exist_ok=True)
                 np.savez(npz, **{k: np.stack(v) for k, v in self._pq_raw.items()})   # (ticks, N, 17|S)
         gt = gt_links.any(dim=1).cpu().numpy()                                            # (N,) any contact on the hand
         n_gt_links = gt_links.sum(dim=1).float().mean().item()
