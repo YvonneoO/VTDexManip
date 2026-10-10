@@ -109,7 +109,26 @@ class PPO:
 
     def load(self, path):
         self.actor_critic.load_state_dict(torch.load(path, map_location=self.device))
-        self.current_learning_iteration = int(path.split("_")[-1].split(".")[0])
+        base = os.path.basename(path)
+        # "model_<it>.pt" -> iteration from the file name; "latest_model.pt" -> iteration from its state file
+        state_path = os.path.join(os.path.dirname(path), base.replace("model_", "state_", 1))
+        state = torch.load(state_path, map_location=self.device) if os.path.isfile(state_path) else None
+        if base.startswith("latest_") and state is not None:
+            self.current_learning_iteration = int(state["iteration"])
+        else:
+            self.current_learning_iteration = int(path.split("_")[-1].split(".")[0])
+        if state is not None:
+            # full resume: Adam moments, the adaptive learning rate and the step/time counters
+            self.optimizer.load_state_dict(state["optimizer"])
+            self.step_size = state["step_size"]
+            for pg in self.optimizer.param_groups:
+                pg["lr"] = self.step_size
+            self.tot_timesteps = state.get("tot_timesteps", 0)
+            self.tot_time = state.get("tot_time", 0)
+            print(f"[ppo] full resume from {state_path}: iteration={self.current_learning_iteration} "
+                  f"step_size={self.step_size:.3g}", flush=True)
+        else:
+            print(f"[ppo] weights-only resume from {path}: optimizer/lr start fresh", flush=True)
         self.actor_critic.train()
     def load_from_dagger(self, path):
         parameters = torch.load(path, map_location=self.device)
@@ -121,6 +140,18 @@ class PPO:
 
     def save(self, path):
         torch.save(self.actor_critic.state_dict(), path)
+
+    def save_state(self, path, it):
+        """Everything model_<it>.pt lacks for an exact continuation, plus run provenance."""
+        meta_keys = ("PREDTAC_RUN_ID", "CHECKPOINT", "CONFIG", "TASK", "NUM_ENVS", "SEED", "PREDTAC_CAPTURE_EVERY",
+                     "PREDTAC_SIM_CROP", "PREDTAC_CONT_SCALE", "PREDTAC_BIN_SCALE", "SLURM_JOB_ID")
+        torch.save({
+            "iteration": int(it), "optimizer": self.optimizer.state_dict(), "step_size": float(self.step_size),
+            "tot_timesteps": int(self.tot_timesteps), "tot_time": float(self.tot_time),
+            "rng": {"torch": torch.get_rng_state(),
+                    "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None},
+            "meta": {k: os.environ.get(k) for k in meta_keys},
+        }, path)
 
     def run(self, num_learning_iterations, log_interval=1):
         # current_obs_state = self.vec_env.reset()
@@ -258,8 +289,15 @@ class PPO:
                     self.results2cvs()
                 if it % (2 * log_interval) == 0:
                     self.save(os.path.join(self.model_dir, 'model_{}.pt'.format(it)))
+                    self.save_state(os.path.join(self.model_dir, 'state_{}.pt'.format(it)), it)
+                # PPO_LATEST_EVERY=N: rolling latest_model.pt / latest_state.pt (a walltime kill loses <= N iterations)
+                _le = int(os.environ.get("PPO_LATEST_EVERY", "0"))
+                if _le > 0 and it % _le == 0:
+                    self.save(os.path.join(self.model_dir, 'latest_model.pt'))
+                    self.save_state(os.path.join(self.model_dir, 'latest_state.pt'), it)
                 ep_infos.clear()
             self.save(os.path.join(self.model_dir, 'model_{}.pt'.format(num_learning_iterations)))
+            self.save_state(os.path.join(self.model_dir, 'state_{}.pt'.format(num_learning_iterations)), num_learning_iterations)
 
     def ac_act_split(self, current_obs_state, max_image_bs = 200):
         # 获取 current_obs_state 的第一个维度

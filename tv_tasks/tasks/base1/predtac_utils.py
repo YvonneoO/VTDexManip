@@ -75,16 +75,22 @@ def _hand_box_from_points(points_world_local, env_origin, view_matrix, proj_matr
 
 def crop_boxes_for_env(right_fingertip_pts, left_fingertip_pts, env_origin,
                         view_matrix, proj_matrix, width, height):
-    """Both hands for one env. right_fingertip_pts/left_fingertip_pts: (5,3)
-    numpy each (env-local). Returns a dict shaped like bidexhands'
-    gt_pose_crop.gt_hand_boxes: {"left": {"box":[x1,y1,x2,y2]}, "right": {...}}
-    (only keys with a valid box), so predtac_client.py's submit() can consume
-    it unmodified."""
-    sides = {}
-    right_box = _hand_box_from_points(right_fingertip_pts, env_origin, view_matrix, proj_matrix, width, height)
-    if right_box is not None:
-        sides["right"] = {"box": right_box}
-    left_box = _hand_box_from_points(left_fingertip_pts, env_origin, view_matrix, proj_matrix, width, height)
-    if left_box is not None:
-        sides["left"] = {"box": left_box}
-    return sides
+    """Hand boxes for one env, keyed like the training cache's SAM3 assignment (dump_sim_cond / sim_cond_cache): NOT by robot
+    hand identity but by IMAGE side -- one visible hand is 'left' if its box centre is in the left half of the image, else
+    'right'; two hands are sorted by box centre x (smaller = 'left'). The predictor's WiLoR slots (and the mirroring of 'left'
+    crops) were trained with exactly this convention. left_fingertip_pts may be None (single-hand tasks).
+    Returns {"left": {"box":[x1,y1,x2,y2]}, "right": {...}} with only the keys that exist."""
+    boxes = []
+    for pts in (right_fingertip_pts, left_fingertip_pts):
+        if pts is None:
+            continue
+        b = _hand_box_from_points(pts, env_origin, view_matrix, proj_matrix, width, height)
+        if b is not None:
+            boxes.append(b)
+    if not boxes:
+        return {}
+    if len(boxes) == 1:
+        cx = 0.5 * (boxes[0][0] + boxes[0][2])
+        return {("left" if cx < width / 2.0 else "right"): {"box": boxes[0]}}
+    boxes.sort(key=lambda b: 0.5 * (b[0] + b[2]))
+    return {"left": {"box": boxes[0]}, "right": {"box": boxes[1]}}

@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""VTDexManip-side client for the online Pred-Tac IPC bridge (predtac_ipc.py,
-same directory) -- vendored/adapted from the DexterousHands repo's
-bidexhands/tactile_collection/predtac_client.py (same asynchronous/stale-
-tolerant design, see predtac_ipc.py's module docstring for why).
+"""bidexhands-side client for the online Pred-Tac IPC bridge (predtac_ipc.py,
+same directory). Owns the per-env "last known" tactile reading and updates it
+opportunistically from whatever the server's newest response is -- see
+predtac_ipc.py's docstring for why this is asynchronous/stale-tolerant
+rather than a per-tick blocking round trip.
 
-Hand-slot convention: index 0 = left, index 1 = right -- matches the
-tactile-prediction model's own input/output convention, same as the
-DexterousHands-side client. handover.py's own crop_boxes_for_env (in
-predtac_utils.py) already returns sides dicts keyed "left"/"right", so this
-client is the one place that commits to a fixed wire-format slot order.
+Hand-slot convention throughout: index 0 = left, index 1 = right -- matches
+the tactile-prediction model's own input/output convention (src/models/
+pose_encoder.py's WiLoRFeatEncoder docstring, src/objectives/flow_matching.py's
+_fold_grid, and pressure_grids.npz's left_pressure_grid/right_pressure_grid
+naming), NOT sim_cond_cache.py's raw SAM3 extraction order (right, left) --
+see Ego2Contact's infer_pred_tactile_offline.py for the same handedness
+caveat on the offline side. gt_pose_crop.py's `sides` dict uses string keys
+("left"/"right") so this client is the one place that commits to a fixed
+slot order for the wire format.
 """
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -35,15 +42,31 @@ class PredTacClient:
         self._last_frames = None
         self._last_boxes = None
         self._last_has_hand = None
-        # See the DexterousHands-side predtac_client.py's identical guard
-        # for the full rationale (a stale leftover response from a reused
-        # run_id can permanently freeze a fresh session on one old frame).
-        predtac_ipc.reset_run(run_id)
+        # Clear any request/response left over from a PREVIOUS process that
+        # used this exact run_id -- see predtac_ipc.reset_run's docstring.
+        # Without this, a stale leftover response can hand a brand-new
+        # session a bogus high-water-mark tick and silently freeze it on one
+        # stale frame for the rest of the run (found live 2026-09-14).
+        self._sim_crop = os.environ.get("PREDTAC_SIM_CROP", "0") == "1"
+        self._pool = ThreadPoolExecutor(max_workers=int(os.environ.get("PREDTAC_CROP_THREADS", "2"))) if self._sim_crop else None
+        # PREDTAC_NUM_SHARDS=M>1: the envs are split into M contiguous slices, slice k talks to its OWN predtac_server
+        # process under run_id "<run_id>_s<k>" (server launched with --num_envs = slice size). Needs PREDTAC_SIM_CROP=1
+        # (the small payload is what makes M independent request files cheap). M=1 keeps the original single run_id.
+        self.num_shards = int(os.environ.get("PREDTAC_NUM_SHARDS", "1"))
+        assert self.num_shards == 1 or self._sim_crop, "PREDTAC_NUM_SHARDS>1 requires PREDTAC_SIM_CROP=1"
+        parts = np.array_split(np.arange(num_envs), self.num_shards)
+        self._shard_slices = [(int(p[0]), int(p[-1]) + 1) for p in parts if p.size > 0]
+        self._shard_runs = [run_id] if self.num_shards == 1 else [f"{run_id}_s{k}" for k in range(len(self._shard_slices))]
+        self._shard_tick_seen = [-1] * len(self._shard_runs)
+        for r in self._shard_runs:
+            predtac_ipc.reset_run(r)
 
     def submit(self, frames_uint8, sides_all_envs):
-        """frames_uint8: (num_envs,H,W,3) uint8. sides_all_envs: list of
-        length num_envs of {"left": {"box": [x1,y1,x2,y2]}, "right": {...}}
-        (either key possibly absent)."""
+        """frames_uint8: (num_envs,H,W,3) uint8, one rendered frame per env
+        (multi_env_camera.render_all_and_capture's output). sides_all_envs:
+        list of length num_envs of gt_pose_crop "sides" dicts
+        ({"left": {"box": [x1,y1,x2,y2]}, "right": {...}}, either key
+        possibly absent)."""
         boxes = np.full((self.num_envs, 2, 4), np.nan, dtype=np.float32)
         has_hand = np.zeros((self.num_envs, 2), dtype=bool)
         for i, sides in enumerate(sides_all_envs):
@@ -52,74 +75,112 @@ class PredTacClient:
                 if info is not None:
                     boxes[i, h] = info["box"]
                     has_hand[i, h] = True
-        predtac_ipc.write_request(self.run_id, self._tick, frames_uint8, boxes, has_hand)
+        if self._sim_crop:
+            # PREDTAC_SIM_CROP=1: crop/resize here (cv2, thread pool) and send ~0.55 MB/env instead of the 2.07 MB
+            # full frame -- the server then does no CPU cropping (see predtac_crop.py)
+            from tv_tasks.tasks.base1 import predtac_crop
+            small, crops = predtac_crop.build_payload(frames_uint8, boxes, has_hand, pool=self._pool)
+            self._write_shards(self._tick, small, crops, boxes, has_hand)
+            frames_uint8 = (small, crops)       # cached for poll_blocking's resubmission
+        else:
+            predtac_ipc.write_request(self.run_id, self._tick, frames_uint8, boxes, has_hand)
         self._tick += 1
         self._last_frames = frames_uint8
         self._last_boxes = boxes
         self._last_has_hand = has_hand
+
+    def _write_shards(self, tick, small, crops, boxes, has_hand):
+        for run, (a, b) in zip(self._shard_runs, self._shard_slices):
+            predtac_ipc.write_request_v2(run, tick, small[a:b], crops[a:b], boxes[a:b], has_hand[a:b])
 
     def poll(self):
         """Non-blocking. Updates self.continuous/self.binary in place if a
         newer server response is available; always returns the current
         (possibly stale, possibly still all-zero before the first response)
         (continuous, binary) pair, each (num_envs, 2, num_links)."""
-        resp = predtac_ipc.read_response(self.run_id)
-        if resp is not None and resp["tick"] > self.last_tick_seen:
-            self.last_tick_seen = resp["tick"]
-            # Defensive: see the DexterousHands-side predtac_client.py's
-            # identical guard for the full rationale -- found live on this
-            # framework's own Handover run (job 539404, iteration 267/4400),
-            # a NaN-in-action-distribution crash consistent with an
-            # unsanitized NaN tactile reading (e.g. a degenerate no-hand
-            # frame) leaking through into the policy.
-            self.continuous = np.nan_to_num(resp["continuous"], nan=0.0)
-            self.binary = np.nan_to_num(resp["binary"], nan=0.0)
+        for k, (run, (a, b)) in enumerate(zip(self._shard_runs, self._shard_slices)):
+            resp = predtac_ipc.read_response(run)
+            if resp is None or resp["tick"] <= self._shard_tick_seen[k]:
+                continue
+            self._shard_tick_seen[k] = resp["tick"]
+            # Defensive: a degenerate frame (e.g. no hand detected, a
+            # transient WiLoR/DINO failure) can in principle leak NaN out of
+            # the server's pooling -- found live 2026-09-14 on VTDexManip's
+            # Handover (job 539404, iteration 267/4400): a MultivariateNormal
+            # ValueError traced back to NaN in the policy's action
+            # distribution, consistent with an unsanitized NaN tactile
+            # reading silently propagating through the obs buffer into the
+            # actor. Zero is the same safe fallback poll() already uses
+            # before any response has ever arrived, so replacing NaN with 0
+            # here is consistent with that existing convention, not a new
+            # semantics.
+            self.continuous[a:b] = np.nan_to_num(resp["continuous"], nan=0.0)
+            self.binary[a:b] = np.nan_to_num(resp["binary"], nan=0.0)
+        # the worst (oldest) shard defines how fresh the whole reading is -- staleness/blocking use this
+        self.last_tick_seen = min(self._shard_tick_seen)
         return self.continuous, self.binary
 
     def staleness_ticks(self):
         """How many client ticks old the most recent response is, right now
-        -- see the DexterousHands-side predtac_client.py's identical method
-        for the full rationale (this file is kept in sync with that one).
-        -1 = no submit made yet; None = no response ever received yet
-        (still serving all-zero fallback) -- neither means zero lag."""
+        -- (last submitted tick) - (tick embedded in the freshest response
+        ever received). self._tick is the NEXT tick to submit, so the most
+        recently submitted one is self._tick - 1. -1 (a submit not yet made)
+        or a very large number (no response ever received, still all-zero)
+        both mean "no real staleness measurement yet", not "zero lag" --
+        callers should treat those as a distinct case, not average them in."""
         if self._tick == 0:
             return -1
         if self.last_tick_seen < 0:
-            return None
+            return None  # no response ever received -- still serving all-zero fallback
         return (self._tick - 1) - self.last_tick_seen
 
     def poll_blocking(self, timeout_s=15.0, poll_interval_s=0.02, resubmit_interval_s=1.0):
-        """Blocking variant of poll() -- see the DexterousHands-side
-        predtac_client.py's identical method for the full rationale (this
-        file is kept in sync with that one). Waits for ANY response newer
-        than what was known at call time, NOT an exact match on the tick
-        just submitted -- the server's own frame_interval decimation means
-        an exact-tick response may never arrive, which the first version of
-        this method got wrong (always burned the full timeout, falling back
-        one tick short every single call).
+        """Blocking variant of poll(): spins until a genuinely NEW response
+        (any tick newer than whatever was known when this was called) has
+        arrived, instead of taking whatever's freshest so far like poll()
+        does. This trades wall-clock time for near-zero staleness, so it's
+        only appropriate where the caller can afford to stall the sim loop:
+        eval (real-time throughput doesn't matter there), or a deliberate
+        training-time throttle experiment (see PREDTAC_BLOCKING in the task
+        classes) -- never the default high-throughput training path, which
+        stays async via poll().
 
-        ⚠️ RESUBMISSION (found live 2026-09-14, Handover job 540680): a
-        SINGLE submitted tick only has a 1-in-frame_interval chance of ever
-        getting a response at all -- the server marks a decimated-away tick
-        "seen" and moves on WITHOUT ever writing a response for it, so
-        passively waiting on one unlucky submission deterministically burns
-        the full timeout_s (confirmed: every odd submitted tick got zero
-        response at frame_interval=2, exactly matching a 250s/iteration
-        blocking-training slowdown that PERSISTED even with server+training
-        forced onto the same physical node -- ruling out filesystem/network
-        causes). Fix: if no newer response has appeared after
-        resubmit_interval_s, re-send the SAME frame (cached by submit())
-        under a fresh tick number -- physics hasn't advanced while we've
-        been waiting, so the frame is still correct, and this gives the
-        server's decimation counter another, differently-paired chance to
-        keep it. Do not raise resubmit_interval_s above timeout_s --
-        frame_interval is a fixed model-training convention, not a
-        throughput knob (see predtac_server.py's --frame_interval help), so
-        without resubmission ~1-in-frame_interval calls are dead on
-        arrival by construction.
+        Deliberately waits for "any newer response", NOT "a response tagged
+        with exactly self._tick - 1": the server decimates to match training's
+        own frame_interval (only every 2nd raw client tick actually advances
+        its window and gets a fresh response -- see predtac_server.py), so a
+        response for the EXACT most-recently-submitted tick may never arrive
+        at all. Waiting for an exact match instead of "any newer" was tried
+        first and burned the full timeout on every single call (see commit
+        history) -- always falling back one tick short of the target instead
+        of ever really blocking.
 
-        Falls back to whatever's freshest and prints a warning if
-        timeout_s elapses first."""
+        ⚠️ RESUBMISSION (found live 2026-09-14): frame_interval decimation
+        means a SINGLE submitted tick has only a 1-in-frame_interval chance
+        of ever getting a response at all -- the server's main loop marks a
+        skipped tick "seen" and moves on WITHOUT ever writing a response for
+        it (see predtac_server.py's `continue` under the decimation check),
+        so passively waiting on one unlucky submission can deterministically
+        burn the full timeout_s -- confirmed live: at frame_interval=2,
+        every odd-numbered submitted tick got zero response, exactly
+        matching a 63s/iteration blocking-training slowdown that PERSISTED
+        even after forcing the server and training processes onto the same
+        physical node (ruling out any filesystem/network cause -- see
+        vision_ppo_train_predtac_colocated.sbatch). Fix: if no newer
+        response has appeared after resubmit_interval_s, re-send the SAME
+        frame (cached by submit()) under a fresh tick number -- physics
+        hasn't advanced while we've been waiting, so the frame content is
+        still correct, and this gives the server's decimation counter
+        another, differently-pared chance to keep it. Never disable this by
+        raising resubmit_interval_s above timeout_s "to save requests" --
+        frame_interval is a fixed model-training convention (NOT a
+        throughput knob, see predtac_server.py's --frame_interval help), so
+        without resubmission roughly 1-in-frame_interval calls are
+        guaranteed dead on arrival.
+
+        Falls back to whatever's freshest and prints a warning if timeout_s
+        elapses first, rather than hanging forever on a dead or
+        permanently-behind server."""
         if self._tick == 0:
             return self.continuous, self.binary
         seen_before = self.last_tick_seen
@@ -133,8 +194,12 @@ class PredTacClient:
                       f"falling back to stale value", flush=True)
                 break
             if now > next_resubmit and self._last_frames is not None:
-                predtac_ipc.write_request(self.run_id, self._tick, self._last_frames,
-                                           self._last_boxes, self._last_has_hand)
+                if self._sim_crop:
+                    self._write_shards(self._tick, self._last_frames[0], self._last_frames[1],
+                                       self._last_boxes, self._last_has_hand)
+                else:
+                    predtac_ipc.write_request(self.run_id, self._tick, self._last_frames,
+                                               self._last_boxes, self._last_has_hand)
                 self._tick += 1
                 next_resubmit = now + resubmit_interval_s
             time.sleep(poll_interval_s)

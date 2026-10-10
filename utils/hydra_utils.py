@@ -535,13 +535,18 @@ def get_args():
         args.models["policy"]["actor_critic"] = "ActorCriticT"
         args.models["learn"]["nminibatches"] = 4
         args.task_envs["env"]["obs_type"] = "PredTac"
-        args.task_envs["env"]["obs_dim"]["tac"] = 68
+        # 68 = two hands x (17 continuous + 17 binary) for handover; the single-hand tasks feed their RIGHT hand only (34)
+        args.task_envs["env"]["obs_dim"]["tac"] = 68 if args.task.split("-")[0] == "handover" else 34
         # Reduced from the config's default 200, same reasoning as
         # bidexhands' own Pen/Scissors PredTac arms: this obs_type renders +
         # IPC-round-trips a camera frame per env per tick, a real added cost
         # every other arm here never pays. Override via PREDTAC_NUM_ENVS if
         # a different scale is needed.
         args.task_envs["env"]["numEnvs"] = int(os.environ.get("PREDTAC_NUM_ENVS", "8"))
+        if os.environ.get("PREDTAC_MAX_ITERATIONS"):
+            args.models["learn"]["max_iterations"] = int(os.environ["PREDTAC_MAX_ITERATIONS"])
+        if os.environ.get("PPO_SAVE_INTERVAL"):      # permanent model_/state_ pair every 2 x save_interval (see ppo.py run())
+            args.models["learn"]["save_interval"] = int(os.environ["PPO_SAVE_INTERVAL"])
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"

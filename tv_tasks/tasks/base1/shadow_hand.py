@@ -78,7 +78,10 @@ class ShadowHandBase(BaseTask):
         # (no diag_tactile_scale.py-style percentile check has been run here
         # the way it was for bidexhands' predtac_server.py diagnostic prints).
         # Treat as a reasonable prior, not a confirmed-correct number.
-        self.predtac_continuous_obs_scale = 20.0
+        # ContactW convention shared with bidexhands' ContactWFt arms: continuous x2.0, binary x3.0 (env-overridable)
+        import os as _os
+        self.predtac_continuous_obs_scale = float(_os.environ.get("PREDTAC_CONT_SCALE", "2.0"))
+        self.predtac_binary_obs_scale = float(_os.environ.get("PREDTAC_BIN_SCALE", "3.0"))
 
         self.startPositionNoise = self.cfg["env"]["startPositionNoise"]
         print(f"startPositionNoise --> {self.startPositionNoise}")

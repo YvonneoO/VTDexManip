@@ -735,7 +735,7 @@ class HandOver(ShadowHandBase):
         # the same unscaled-tactile-channel bug pattern found (and fixed)
         # in bidexhands' Pen/Scissors. binary is already 0/1, no scale needed.
         continuous = self.predtac_continuous_obs_scale * torch.from_numpy(continuous_np).to(self.device)
-        binary = torch.from_numpy(binary_np).to(self.device)
+        binary = self.predtac_binary_obs_scale * torch.from_numpy(binary_np).to(self.device)
         # "right" hand (self.fingertip_pos) first, "left" (a_fingertip_pos) second --
         # matches compute_robot_state's own robot_state-then-a_robot_state order.
         right_tactile = torch.cat([continuous[:, 1, :], binary[:, 1, :]], dim=-1)

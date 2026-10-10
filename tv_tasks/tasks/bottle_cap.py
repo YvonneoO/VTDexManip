@@ -8,13 +8,14 @@ import torch
 
 from tv_tasks.utils.torch_jit_utils import *
 from tv_tasks.tasks.base.shadow_hand import ShadowHandBase
+from tv_tasks.tasks.base.predtac_obs import PredTacObsMixin
 from isaacgym import gymtorch
 from isaacgym import gymapi
 import pickle
 from isaacgym.gymutil import get_property_setter_map, get_property_getter_map, get_default_setter_args, apply_random_samples, check_buckets, generate_random_samples
 import operator
 
-class BottleCap(ShadowHandBase):
+class BottleCap(PredTacObsMixin, ShadowHandBase):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
         self.table_dims = gymapi.Vec3(1, 1, 0.6)
         self.set_camera(cfg, self.table_dims.z)
@@ -423,6 +424,10 @@ class BottleCap(ShadowHandBase):
             # magnitude (same 20 sensors as TacOnly/t_scr, not binarized).
             touch_force_obs_gt = self.tac_gt_obs_scale * self.compute_sensor_obs(gt_continuous=True)
             self.obs_states_buf = torch.cat((base_state, touch_force_obs_gt), dim=1)
+
+        elif self.obs_type == 'PredTac':
+            # PPO P+Pred-Tac arm: proprioception + the ONLINE tactile predictor's right-hand per-link output (34 dims)
+            self.obs_states_buf = torch.cat((base_state, self.compute_predtac_obs()), dim=1)
 
     def reset_idx(self, env_ids, goal_env_ids):
         # randomization can happen only at reset time, since it can reset actor positions on GPU

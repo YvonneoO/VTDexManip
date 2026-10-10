@@ -750,6 +750,7 @@ class ShadowHandBase(BaseTask):
         self.camera_seg_tensor_list.append(seg_tensors)
         self.camera_vinv_mat_list.append(vinv_mats)
         self.camera_proj_mat_list.append(proj_mats)
+        self.camera_handles.append(camera_handles)   # PredTac: view/proj matrices are queried from these handles
 
         return
 
