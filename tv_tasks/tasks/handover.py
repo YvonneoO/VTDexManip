@@ -3,11 +3,12 @@ import os
 import torch
 from tv_tasks.utils.torch_jit_utils import *
 from tv_tasks.tasks.base1.shadow_hand import ShadowHandBase
+from tv_tasks.tasks.base.predtac_obs import PredTacObsMixin   # hand-level quality monitor (_pq_update) only
 from isaacgym import gymtorch
 from isaacgym import gymapi
 import random
 
-class HandOver(ShadowHandBase):
+class HandOver(PredTacObsMixin, ShadowHandBase):
     def __init__(self, cfg, sim_params, physics_engine, device_type, device_id, headless):
         self.table_dims = gymapi.Vec3(1, 1, 0.6)
         self.set_camera(cfg, self.table_dims.z)
@@ -736,6 +737,8 @@ class HandOver(ShadowHandBase):
         if self._predtac_client._tick % 25 == 0:
             print(f"[predtac][staleness] client_tick={self._predtac_client._tick} "
                   f"stale_ticks={_stale}", flush=True)
+        if os.environ.get("PREDTAC_QUALITY_LOG", "0") == "1":
+            self._pq_update(binary_np[:, 1, :], _stale)     # right hand: predicted channel 1 vs sim right-hand contact
 
         # See base1/shadow_hand.py's predtac_continuous_obs_scale for the
         # rationale -- this channel had no scale at all before 2026-09-14,

@@ -88,6 +88,9 @@ class PredTacObsMixin:
         self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0)
 
     def _pq_update(self, bin_right, stale):
+        if not hasattr(self, "_pq"):
+            self._pq_hist = []
+            self._pq_reset()
         contact = self.contact_force[self.hand_contact_idx].view(self.num_envs, self.num_force_sensors, 3)
         gt = (torch.norm(contact, p=2, dim=2) > 0.01).any(dim=1).cpu().numpy()            # (N,) any contact on the right hand
         self._pq_hist.append(gt)
