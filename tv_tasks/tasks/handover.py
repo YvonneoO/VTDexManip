@@ -697,15 +697,10 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
         self.gym.start_access_image_tensors(self.sim)
 
         env_origin_np = self.env_origin.detach().cpu().numpy()
-        # whole-hand body points (right actor bodies first, then the other hand's): a box that covers palm + wrist like a SAM3 mask
-        _nb = int(self.num_shadow_hand_bodies)
-        _rb = self.rigid_body_states.view(self.num_envs, -1, 13)[:, :, 0:3]
-        if _rb.shape[1] >= 2 * _nb:
-            right_pts_np = _rb[:, 0:_nb].detach().cpu().numpy()
-            left_pts_np = _rb[:, _nb:2 * _nb].detach().cpu().numpy()
-        else:                                                           # fallback: fingertips only
-            right_pts_np = self.fingertip_pos.detach().cpu().numpy()
-            left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()
+        # fingertips (+ right palm): see base/predtac_obs.py for why not all hand bodies. rigid_body_states has a different
+        # body count per env here, so only the index-based gathers (fingertip_pos) are valid, never a .view(num_envs, -1, 13).
+        right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
+        left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
 
         n_active = self._predtac_num_active_envs
         frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
