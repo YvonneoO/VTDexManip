@@ -48,13 +48,19 @@ def project_world_to_pixel(points_world, view_matrix, proj_matrix, width, height
 
 
 def _hand_box_from_points(points_world_local, env_origin, view_matrix, proj_matrix, width, height,
-                           pad_frac=0.30, min_pad_px=16.0):
+                           pad_frac=None, min_pad_px=None):
     """points_world_local: (K,3) numpy, env-local frame (e.g. fingertip_pos
     for one hand in one env). pad_frac is larger than gt_pose_crop.py's
     default (0.15): fingertip positions alone (no palm/wrist points, unlike
     bidexhands' broader per-link set) undercover the hand, so pad more to
     compensate. Returns None if no point lands in front of the camera or the
     resulting box is degenerate after clamping to the image."""
+    import os
+    # fingertip points alone undercover the hand (palm + wrist are what a SAM3 hand mask contains): padding is env-tunable
+    if pad_frac is None:
+        pad_frac = float(os.environ.get("PREDTAC_BOX_PAD", "0.60"))
+    if min_pad_px is None:
+        min_pad_px = float(os.environ.get("PREDTAC_BOX_MIN_PAD", "24"))
     pts_global = points_world_local + np.asarray(env_origin, dtype=np.float64)[None, :]
     u, v, in_front = project_world_to_pixel(pts_global, view_matrix, proj_matrix, width, height)
     if not np.any(in_front):
@@ -94,3 +100,30 @@ def crop_boxes_for_env(right_fingertip_pts, left_fingertip_pts, env_origin,
         return {("left" if cx < width / 2.0 else "right"): {"box": boxes[0]}}
     boxes.sort(key=lambda b: 0.5 * (b[0] + b[2]))
     return {"left": {"box": boxes[0]}, "right": {"box": boxes[1]}}
+
+
+_DUMP = {"n": 0}
+
+
+def dump_frames(frames, sides_all_envs, step):
+    """Diagnostic (env PREDTAC_DUMP_DIR): same format as bidexhands' predtac_quality.dump_frames."""
+    import json
+    import os
+    import cv2
+    d = os.environ.get("PREDTAC_DUMP_DIR")
+    if not d or _DUMP["n"] >= int(os.environ.get("PREDTAC_DUMP_MAX", "40")):
+        return
+    if step % int(os.environ.get("PREDTAC_DUMP_EVERY", "40")) != 0:
+        return
+    os.makedirs(os.path.join(d, "frames"), exist_ok=True)
+    rows = []
+    for i in range(int(os.environ.get("PREDTAC_DUMP_ENVS", "3"))):
+        name = f"s{step:06d}_e{i}.png"
+        cv2.imwrite(os.path.join(d, "frames", name), cv2.cvtColor(frames[i], cv2.COLOR_RGB2BGR))
+        rows.append({"file": name, "step": int(step), "env": i,
+                     "boxes": {k: [float(x) for x in v["box"]] for k, v in sides_all_envs[i].items()},
+                     "hw": [int(frames[i].shape[0]), int(frames[i].shape[1])]})
+    with open(os.path.join(d, "meta.jsonl"), "a") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+    _DUMP["n"] += 1

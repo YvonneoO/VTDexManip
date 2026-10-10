@@ -63,6 +63,9 @@ class PredTacObsMixin:
                                                 self.cam_w, self.cam_h))
             self.gym.end_access_image_tensors(self.sim)
             self._predtac_client.submit(frames, sides)
+            if os.environ.get("PREDTAC_DUMP_DIR"):
+                from tv_tasks.tasks.base1.predtac_utils import dump_frames
+                dump_frames(frames, sides, self._predtac_step)
             if self._predtac_step % (50 * self._predtac_capture_every) == 0:
                 n_box = sum(1 for s in sides if s)
                 print(f"[predtac][box] step={self._predtac_step} envs_with_box={n_box}/{self.num_envs}", flush=True)
