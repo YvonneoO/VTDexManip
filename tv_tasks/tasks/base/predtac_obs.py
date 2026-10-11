@@ -102,12 +102,9 @@ class PredTacObsMixin:
             if self._predtac_step % (50 * self._predtac_capture_every) == 0:
                 n_box = sum(1 for s in sides if s)
                 print(f"[predtac][box] step={self._predtac_step} envs_with_box={n_box}/{self.num_envs}", flush=True)
-        if _submitted and os.environ.get("PREDTAC_BLOCKING", "0") == "1":
-            # synchronous: wait for the answer to the frame just submitted (no dropped frames, no staleness; the sim runs at the
-            # server's speed). Other steps (capture_every > 1) reuse that answer, i.e. are at most capture_every-1 env steps old.
-            cont, binary = self._predtac_client.poll_blocking()
-        else:
-            cont, binary = self._predtac_client.poll()         # (N,2,17): slot 0 = left output channel, 1 = right
+        # PREDTAC_BLOCKING=1: wait for the answer to the frame just submitted; PREDTAC_PIPELINE=1: wait for the previous one; else async
+        # (see PredTacClient.poll_mode). Non-captured steps never wait and reuse the latest answer.
+        cont, binary = self._predtac_client.poll_mode(_submitted)      # (N,2,17): slot 0 = left output channel, 1 = right
         stale = self._predtac_client.staleness_ticks()
         if self._predtac_client._tick % 25 == 0 and self._predtac_step % self._predtac_capture_every == 0:
             print(f"[predtac][staleness] client_tick={self._predtac_client._tick} stale_ticks={stale}", flush=True)
