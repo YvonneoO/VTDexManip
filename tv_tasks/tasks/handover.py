@@ -723,7 +723,7 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
 
         self.gym.end_access_image_tensors(self.sim)
 
-        self._predtac_client.submit(frames, sides_all_envs)
+        self._predtac_client.submit(frames, sides_all_envs, progress=self.progress_buf, capture_every=1)
         # PREDTAC_BLOCKING=1 trades sim throughput for near-zero staleness --
         # see bidexhands' shadow_hand_pen.py's identical block for the full
         # rationale (kept in sync across both frameworks).

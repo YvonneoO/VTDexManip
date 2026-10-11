@@ -90,7 +90,7 @@ class PredTacObsMixin:
                 sides.append(crop_boxes_for_env(pts[i], None, origin[i], self._predtac_view[i], self._predtac_proj[i],
                                                 self.cam_w, self.cam_h))
             self.gym.end_access_image_tensors(self.sim)
-            self._predtac_client.submit(frames, sides)
+            self._predtac_client.submit(frames, sides, progress=self.progress_buf, capture_every=self._predtac_capture_every)
             if os.environ.get("PREDTAC_DUMP_DIR"):
                 from tv_tasks.tasks.base1.predtac_utils import dump_frames
                 dump_frames(frames, sides, self._predtac_step)
