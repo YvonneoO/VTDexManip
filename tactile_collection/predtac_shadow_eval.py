@@ -32,18 +32,26 @@ def main():
     sarl.test(args.resume_model)
     obs = env.reset()
     n_done, n_succ = 0, 0
+    rec = {"actions": [], "dones": [], "progress": []}      # PREDTAC_DUMP_DIR set: the expert's actions, so the episode can be re-simulated
     for t in range(steps):
         with torch.no_grad():
             actions = sarl.actor_critic.act_inference(obs)
             next_obs, rews, dones, infos = env.step(actions)
             obs.copy_(next_obs)
         d = dones.detach().cpu().numpy().astype(bool)
+        if os.environ.get("PREDTAC_DUMP_DIR"):
+            rec["actions"].append(actions.detach().cpu().numpy().astype("float32"))
+            rec["dones"].append(d)
+            rec["progress"].append(env.progress_buf.detach().cpu().numpy() if hasattr(env, "progress_buf") else d.astype("int64") * 0)
         if d.any():
             n_done += int(d.sum())
             if isinstance(infos, dict) and "successes" in infos:
                 n_succ += int((infos["successes"].detach().cpu().numpy()[d] > 0).sum())
         if (t + 1) % 100 == 0:
             print(f"[shadow] step={t + 1}/{steps} episodes_done={n_done} successes={n_succ}", flush=True)
+    if os.environ.get("PREDTAC_DUMP_DIR") and rec["actions"]:
+        import numpy as np
+        np.savez(os.path.join(os.environ["PREDTAC_DUMP_DIR"], "shadow_actions.npz"), **{k: np.stack(v) for k, v in rec.items()})
     print(f"[shadow] DONE steps={steps} episodes_done={n_done} successes={n_succ}", flush=True)
 
 

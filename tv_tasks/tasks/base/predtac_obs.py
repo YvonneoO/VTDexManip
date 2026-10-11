@@ -93,7 +93,11 @@ class PredTacObsMixin:
             self._predtac_client.submit(frames, sides, progress=self.progress_buf, capture_every=self._predtac_capture_every)
             if os.environ.get("PREDTAC_DUMP_DIR"):
                 from tv_tasks.tasks.base1.predtac_utils import dump_frames
-                dump_frames(frames, sides, self._predtac_step)
+                _cl = self._predtac_client
+                dump_frames(frames, sides, self._predtac_step, extra={
+                    "tick": int(_cl._tick - 1),                # request tick the server saw this frame under
+                    "reset": _cl._last_reset if _cl._last_reset is not None else False,
+                    "progress": self.progress_buf.detach().cpu().numpy()})
             if self._predtac_step % (50 * self._predtac_capture_every) == 0:
                 n_box = sum(1 for s in sides if s)
                 print(f"[predtac][box] step={self._predtac_step} envs_with_box={n_box}/{self.num_envs}", flush=True)

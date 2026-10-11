@@ -105,7 +105,7 @@ def crop_boxes_for_env(right_fingertip_pts, left_fingertip_pts, env_origin,
 _DUMP = {"n": 0}
 
 
-def dump_frames(frames, sides_all_envs, step):
+def dump_frames(frames, sides_all_envs, step, extra=None):
     """Diagnostic (env PREDTAC_DUMP_DIR): same format as bidexhands' predtac_quality.dump_frames."""
     import json
     import os
@@ -123,6 +123,8 @@ def dump_frames(frames, sides_all_envs, step):
         rows.append({"file": name, "step": int(step), "env": i,
                      "boxes": {k: [float(x) for x in v["box"]] for k, v in sides_all_envs[i].items()},
                      "hw": [int(frames[i].shape[0]), int(frames[i].shape[1])]})
+        for k, v in (extra or {}).items():                     # per-env values (list/array indexed by env) or scalars
+            rows[-1][k] = (v[i].item() if hasattr(v[i], "item") else v[i]) if hasattr(v, "__len__") else v
     with open(os.path.join(d, "meta.jsonl"), "a") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
