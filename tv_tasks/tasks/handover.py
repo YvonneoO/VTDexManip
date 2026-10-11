@@ -700,34 +700,42 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
         if not hasattr(self, "_predtac_client"):
             self._predtac_lazy_init()
 
-        self.gym.render_all_camera_sensors(self.sim)
-        self.gym.start_access_image_tensors(self.sim)
+        # PREDTAC_CAPTURE_EVERY=N: render/crop/submit only every N-th env step (the training windows are 4 env steps apart; with
+        # N=2 the server runs frame_interval=1, window_stride=2). Default 1 = every step, the old behaviour.
+        if not hasattr(self, "_predtac_capture_every"):
+            self._predtac_capture_every = int(os.environ.get("PREDTAC_CAPTURE_EVERY", "1"))
+            self._predtac_step = -1
+        self._predtac_step += 1
+        _submitted = self._predtac_step % self._predtac_capture_every == 0
+        if _submitted:
+            self.gym.render_all_camera_sensors(self.sim)
+            self.gym.start_access_image_tensors(self.sim)
 
-        env_origin_np = self.env_origin.detach().cpu().numpy()
-        # fingertips (+ right palm): see base/predtac_obs.py for why not all hand bodies. rigid_body_states has a different
-        # body count per env here, so only the index-based gathers (fingertip_pos) are valid, never a .view(num_envs, -1, 13).
-        right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
-        left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
+            env_origin_np = self.env_origin.detach().cpu().numpy()
+            # fingertips (+ right palm): see base/predtac_obs.py for why not all hand bodies. rigid_body_states has a different
+            # body count per env here, so only the index-based gathers (fingertip_pos) are valid, never a .view(num_envs, -1, 13).
+            right_pts_np = self.fingertip_pos.detach().cpu().numpy()      # (num_envs, 5, 3), env-local
+            left_pts_np = self.a_fingertip_pos.detach().cpu().numpy()     # (num_envs, 5, 3), env-local
 
-        n_active = self._predtac_num_active_envs
-        frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
-        sides_all_envs = []
-        for i in range(self.num_envs):
-            if i >= n_active:
-                sides_all_envs.append({})  # no camera for this env -- see _predtac_lazy_init's [WARN]
-                continue
-            frames[i] = self.camera_rgb_tensor_list[i][0][:, :, :3].detach().cpu().numpy().astype(np.uint8)
-            sides_all_envs.append(crop_boxes_for_env(
-                right_pts_np[i], left_pts_np[i], env_origin_np[i],
-                self._predtac_view_matrices[i], self._predtac_proj_matrices[i], self.cam_w, self.cam_h))
+            n_active = self._predtac_num_active_envs
+            frames = np.zeros((self.num_envs, self.cam_h, self.cam_w, 3), dtype=np.uint8)
+            sides_all_envs = []
+            for i in range(self.num_envs):
+                if i >= n_active:
+                    sides_all_envs.append({})  # no camera for this env -- see _predtac_lazy_init's [WARN]
+                    continue
+                frames[i] = self.camera_rgb_tensor_list[i][0][:, :, :3].detach().cpu().numpy().astype(np.uint8)
+                sides_all_envs.append(crop_boxes_for_env(
+                    right_pts_np[i], left_pts_np[i], env_origin_np[i],
+                    self._predtac_view_matrices[i], self._predtac_proj_matrices[i], self.cam_w, self.cam_h))
 
-        self.gym.end_access_image_tensors(self.sim)
+            self.gym.end_access_image_tensors(self.sim)
 
-        self._predtac_client.submit(frames, sides_all_envs, progress=self.progress_buf, capture_every=1)
+            self._predtac_client.submit(frames, sides_all_envs, progress=self.progress_buf, capture_every=self._predtac_capture_every)
         # PREDTAC_BLOCKING=1 trades sim throughput for near-zero staleness --
         # see bidexhands' shadow_hand_pen.py's identical block for the full
         # rationale (kept in sync across both frameworks).
-        if os.environ.get("PREDTAC_BLOCKING", "0") == "1":
+        if os.environ.get("PREDTAC_BLOCKING", "0") == "1" and _submitted:
             continuous_np, binary_np = self._predtac_client.poll_blocking()
         else:
             continuous_np, binary_np = self._predtac_client.poll()  # each (num_envs, 2, 17), slot 0=left, 1=right
