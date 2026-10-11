@@ -1,3 +1,9 @@
+try:  # online Pred-Tac runs: turn a hung IsaacGym/gymtorch startup into a quick failure (see startup_watchdog.py)
+    import startup_watchdog as _sw
+    _sw.start()
+except Exception as _e:  # never let the watchdog break a run
+    _sw = None
+    print("[watchdog] not active:", _e, flush=True)
 from utils.hydra_utils import parse_sim_params, parse_task, set_np_formatting, set_seed, get_args
 from model.process_sarl import process_sarl
 

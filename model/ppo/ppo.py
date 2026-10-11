@@ -220,6 +220,11 @@ class PPO:
             env_mean_success = 0.0
 
             for it in range(self.current_learning_iteration, num_learning_iterations):
+                try:
+                    import startup_watchdog
+                    startup_watchdog.progress()
+                except Exception:
+                    pass
                 start = time.time()
                 ep_infos = []
 

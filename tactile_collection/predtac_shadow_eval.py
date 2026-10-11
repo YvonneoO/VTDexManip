@@ -12,6 +12,13 @@ import os
 import sys
 
 sys.path.insert(0, os.getcwd())
+try:  # online Pred-Tac runs: turn a hung IsaacGym/gymtorch startup into a quick failure (see startup_watchdog.py)
+    import startup_watchdog as _sw
+    _sw.start()
+except Exception as _e:  # never let the watchdog break a run
+    _sw = None
+    print("[watchdog] not active:", _e, flush=True)
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils.hydra_utils import parse_sim_params, parse_task, set_np_formatting, set_seed, get_args
@@ -38,6 +45,8 @@ def main():
             actions = sarl.actor_critic.act_inference(obs)
             next_obs, rews, dones, infos = env.step(actions)
             obs.copy_(next_obs)
+        if _sw is not None:
+            _sw.progress()
         d = dones.detach().cpu().numpy().astype(bool)
         if os.environ.get("PREDTAC_DUMP_DIR"):
             rec["actions"].append(actions.detach().cpu().numpy().astype("float32"))
