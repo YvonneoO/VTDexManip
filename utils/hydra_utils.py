@@ -547,6 +547,21 @@ def get_args():
             args.models["learn"]["max_iterations"] = int(os.environ["PREDTAC_MAX_ITERATIONS"])
         if os.environ.get("PPO_SAVE_INTERVAL"):      # permanent model_/state_ pair every 2 x save_interval (see ppo.py run())
             args.models["learn"]["save_interval"] = int(os.environ["PPO_SAVE_INTERVAL"])
+    elif args.task.split("-")[-1] == "gtfmt":
+        # P+GT-tac in the Pred-Tac observation FORMAT: same ActorCriticT layout and tactile width as "predtac" (34 per hand, 68 for
+        # handover, object state kept there), but the 17-link continuous/binary values are simulator ground truth
+        # (PredTacObsMixin.compute_gtfmt_obs, GTFMT_SOURCE=force|contacts). No camera, no predictor server.
+        args.models["encoder"]["name"] = "mlp"
+        args.models["policy"]["actor_critic"] = "ActorCriticT"
+        args.models["learn"]["nminibatches"] = 4
+        args.task_envs["env"]["obs_type"] = "GTFmt"
+        args.task_envs["env"]["obs_dim"]["tac"] = 68 if args.task.split("-")[0] == "handover" else 34
+        if os.environ.get("GTFMT_NUM_ENVS"):
+            args.task_envs["env"]["numEnvs"] = int(os.environ["GTFMT_NUM_ENVS"])
+        if os.environ.get("GTFMT_MAX_ITERATIONS"):
+            args.models["learn"]["max_iterations"] = int(os.environ["GTFMT_MAX_ITERATIONS"])
+        if os.environ.get("PPO_SAVE_INTERVAL"):
+            args.models["learn"]["save_interval"] = int(os.environ["PPO_SAVE_INTERVAL"])
     elif args.task.split("-")[-1] == "base":
         args.models["encoder"]["name"] = "vt20t-reall-tmr05-bin-ft+dataset-ViTacReal-900f"
         args.models["policy"]["actor_critic"] = "ActorCritic"

@@ -112,6 +112,98 @@ class PredTacObsMixin:
         K = self._PQ_K + 1
         self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0, npl=0.0, ngl=0.0)
 
+    # ---- P+GT-tac in the Pred-Tac observation FORMAT (obs_type "GTFmt", task suffix "-gtfmt") ----------------------------------------
+    # Same 17 anatomical links per hand, same (continuous x2.0, binary x3.0) layout and scaling as compute_predtac_obs, but the values
+    # are simulator ground truth instead of the online predictor. Comparing it with P+Pred-Tac isolates the predictor's error; comparing
+    # it with the native 20-sensor t_scr_gt isolates the format change. Source (GTFMT_SOURCE):
+    #   "force"    (default) sensor-body net contact force -> link force, / (link area * vmax), clipped; cheap, same physical source as t_scr_gt
+    #   "contacts" the predictor's TRAINING-label definition (get_env_rigid_contacts -> EgoTouchTaxelMapper.project -> /vmax -> max over
+    #              the link's cells); exact label, but a CPU contact-list pass per env per step (slow with 200 envs)
+    _GTFMT_SENSOR_TO_LINK = {"lfdistal": "lfdistal", "rfdistal": "rfdistal", "mfdistal": "mfdistal", "ffdistal": "ffdistal",
+                             "thdistal": "thdistal", "lfmiddle": "lfmiddle", "rfmiddle": "rfmiddle", "mfmiddle": "mfmiddle",
+                             "ffmiddle": "ffmiddle", "thmiddle": "thmiddle", "lfproximal": "lfproximal", "rfproximal": "rfproximal",
+                             "mfproximal": "mfproximal", "ffproximal": "ffproximal", "thproximal": "thproximal",
+                             "lfknuckle": "lfmetacarpal", "palm": "palm"}     # rf/mf/ff knuckles have no taxels in the label either
+
+    def _gtfmt_init(self):
+        import sys
+        d = os.path.join(os.getcwd(), "tactile_collection")
+        if d not in sys.path:
+            sys.path.insert(0, d)
+        from egotouch_taxels import EgoTouchTaxelMapper, _layout, _load_valid_cells
+        mp_r = os.path.join(d, "assets", "pressure_position_mapping_right.json")
+        valid = _load_valid_cells(mp_r)
+        groups = _layout("right", valid)
+        self._gt_names = sorted(groups)                                              # the predictor's link order (alphabetical)
+        probe = EgoTouchTaxelMapper(self.gym, self.envs[0], "hand", "right", mp_r)  # only for the physical taxel areas
+        area = probe.taxel_area_m2
+        self._gt_area = np.array([float(sum(area[r, c] for r, c in groups[n])) for n in self._gt_names], np.float64)
+        sensors = [n[3:] for n in self.force_sensor_body]                            # "fs_ffdistal" -> "ffdistal"
+        smap = np.full((len(sensors),), -1, np.int64)
+        for k, n in enumerate(sensors):
+            tgt = self._GTFMT_SENSOR_TO_LINK.get(n)
+            if tgt in self._gt_names:
+                smap[k] = self._gt_names.index(tgt)
+        self._gt_smap = smap
+        task = os.environ.get("TASK", "")
+        default_vmax = 100146.2 if task.startswith("slide") else (94107.4 if task.startswith("bottle") else (8634.84 if task.startswith("handover") else 0.0))
+        self._gt_vmax = float(os.environ.get("GTFMT_VMAX", default_vmax))
+        assert self._gt_vmax > 0, "set GTFMT_VMAX (the task's pressure normaliser)"
+        self._gt_src = os.environ.get("GTFMT_SOURCE", "force")
+        self._gt_cs = float(os.environ.get("PREDTAC_CONT_SCALE", "2.0"))
+        self._gt_bs = float(os.environ.get("PREDTAC_BIN_SCALE", "3.0"))
+        self._gt_thr = float(os.environ.get("GTFMT_THR", "0.1"))
+        if self._gt_src == "contacts":
+            mp_l = os.path.join(d, "assets", "pressure_position_mapping_left.json")
+            self._gt_mappers = {"right": [EgoTouchTaxelMapper(self.gym, e, "hand", "right", mp_r) for e in self.envs]}
+            if hasattr(self, "another_hand_contact_idx") and len(getattr(self, "another_hand_contact_idx", [])) > 0:
+                self._gt_mappers["left"] = [EgoTouchTaxelMapper(self.gym, e, "another_hand", "left", mp_l) for e in self.envs]
+            self._gt_lmasks = np.zeros((len(self._gt_names), 21, 21), bool)
+            for l, n in enumerate(self._gt_names):
+                for r, c in groups[n]:
+                    self._gt_lmasks[l, r, c] = True
+        print(f"[GTFmt] same-format GT tactile: source={self._gt_src} vmax={self._gt_vmax} links={len(self._gt_names)} "
+              f"sensors mapped={int((smap >= 0).sum())}/{len(smap)} scales cont={self._gt_cs} bin={self._gt_bs}", flush=True)
+
+    def _gtfmt_hand(self, contact_idx, side):
+        """(N,17) normalised link value in [0,1] for one hand."""
+        if self._gt_src == "contacts":
+            out = np.zeros((self.num_envs, len(self._gt_names)), np.float32)
+            for i, env_ptr in enumerate(self.envs):
+                pa, _, _ = self._gt_mappers[side][i].project(self.gym.get_env_rigid_contacts(env_ptr))
+                pn = np.clip(np.nan_to_num(pa) / self._gt_vmax, 0.0, 1.0)
+                for l in range(len(self._gt_names)):
+                    out[i, l] = pn[self._gt_lmasks[l]].max()
+            return torch.from_numpy(out).to(self.device)
+        contact = self.contact_force[contact_idx].view(self.num_envs, self.num_force_sensors, 3)
+        f = torch.norm(contact, p=2, dim=2)                                           # (N, 20) N per sensor body
+        link_f = torch.zeros((self.num_envs, len(self._gt_names)), device=self.device)
+        for k in range(f.shape[1]):
+            l = int(self._gt_smap[k])
+            if l >= 0:
+                link_f[:, l] += f[:, k]
+        scale = torch.as_tensor(1.0 / (self._gt_area * self._gt_vmax), dtype=torch.float32, device=self.device)
+        return (link_f * scale).clamp(0.0, 1.0)
+
+    def compute_gtfmt_obs(self):
+        """Tactile segment in compute_predtac_obs' exact layout: [right cont(17), right bin(17)] (+ [left cont, left bin] for handover)."""
+        if not hasattr(self, "_gt_names"):
+            self._gtfmt_init()
+        def seg(idx, side):
+            g = self._gtfmt_hand(idx, side)
+            return torch.cat([self._gt_cs * g, self._gt_bs * (g > self._gt_thr).float()], dim=-1)
+        right = seg(self.hand_contact_idx, "right")
+        out = right
+        if hasattr(self, "another_hand_contact_idx") and len(getattr(self, "another_hand_contact_idx", [])) > 0:
+            out = torch.cat([right, seg(self.another_hand_contact_idx, "left")], dim=-1)   # handover: right hand first, then left
+        self._gt_calls = getattr(self, "_gt_calls", 0) + 1
+        if self._gt_calls % 200 == 1:
+            n = right.shape[-1] // 2
+            print(f"[GTFmt] call {self._gt_calls}: right cont mean {right[:, :n].mean().item() / self._gt_cs:.4f} "
+                  f"max {right[:, :n].max().item() / self._gt_cs:.3f} | binary frac {(right[:, n:] > 0).float().mean().item():.3f} | dim {out.shape[-1]}",
+                  flush=True)
+        return out
+
     def _pq_label_links(self):
         """The predictor's TRAINING-label definition, computed online: per env, EgoTouchTaxelMapper.project(get_env_rigid_contacts) as the
         data collectors did, then /vmax, clip, max over each of the 17 anatomical links -> (N,17) link values and (N,17) link force (N).

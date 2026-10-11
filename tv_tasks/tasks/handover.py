@@ -572,6 +572,10 @@ class HandOver(PredTacObsMixin, ShadowHandBase):
             if os.environ.get("PREDTAC_SHADOW") == "1":
                 self.compute_predtac_obs()   # monitoring only (tactile_collection/predtac_shadow_eval.py); result discarded
 
+        elif self.obs_type == 'GTFmt':
+            # P+GT-tac in the Pred-Tac observation format (same 17 links, same scales): see PredTacObsMixin.compute_gtfmt_obs
+            self.obs_states_buf = torch.cat((base_state, self.compute_gtfmt_obs()), dim=1)
+
         elif self.obs_type == 'PredTac':
             # PPO P+Pred-Tac arm: same base_state as t_scr_gt_priv (obj_state
             # KEPT, not stripped -- see hydra_utils.py's "predtac" branch),
