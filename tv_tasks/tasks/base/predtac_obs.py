@@ -112,6 +112,42 @@ class PredTacObsMixin:
         K = self._PQ_K + 1
         self._pq = dict(tp=np.zeros(K), pos=np.zeros(K), fp=np.zeros(K), neg=np.zeros(K), gt=0.0, pr=0.0, n=0, npl=0.0, ngl=0.0)
 
+    def _pq_label_links(self):
+        """The predictor's TRAINING-label definition, computed online: per env, EgoTouchTaxelMapper.project(get_env_rigid_contacts) as the
+        data collectors did, then /vmax, clip, max over each of the 17 anatomical links -> (N,17) link values and (N,17) link force (N).
+        PREDTAC_QUALITY_CONTACTS=1 (right-hand tasks only). Lets the monitor score the predictor against the SAME quantity it was trained on,
+        instead of the net-contact-force tensor (which can read 0 while the hand rests on the object)."""
+        if not hasattr(self, "_pq_mappers"):
+            import sys
+            d = os.path.join(os.getcwd(), "tactile_collection")
+            if d not in sys.path:
+                sys.path.insert(0, d)
+            from egotouch_taxels import EgoTouchTaxelMapper, _layout, _load_valid_cells
+            mp = os.path.join(d, "assets", "pressure_position_mapping_right.json")
+            self._pq_mappers = [EgoTouchTaxelMapper(self.gym, env_ptr, "hand", "right", mp) for env_ptr in self.envs]
+            groups = _layout("right", _load_valid_cells(mp))
+            self._pq_lnames = sorted(groups)
+            self._pq_lmasks = np.zeros((len(self._pq_lnames), 21, 21), bool)
+            for l, n in enumerate(self._pq_lnames):
+                for r, c in groups[n]:
+                    self._pq_lmasks[l, r, c] = True
+            task = os.environ.get("TASK", "")
+            default_vmax = 100146.2 if task.startswith("slide") else (94107.4 if task.startswith("bottle") else 0.0)
+            self._pq_lvmax = float(os.environ.get("PREDTAC_QUALITY_VMAX", default_vmax))
+            assert self._pq_lvmax > 0, "set PREDTAC_QUALITY_VMAX for PREDTAC_QUALITY_CONTACTS"
+            print(f"[predtac][quality] label monitor on: vmax={self._pq_lvmax} links={self._pq_lnames}", flush=True)
+        lab = np.zeros((self.num_envs, len(self._pq_lnames)), np.float32)
+        lforce = np.zeros_like(lab)
+        for i, env_ptr in enumerate(self.envs):
+            pa, fg, _ = self._pq_mappers[i].project(self.gym.get_env_rigid_contacts(env_ptr))
+            pn = np.clip(np.nan_to_num(pa) / self._pq_lvmax, 0.0, 1.0)
+            fg = np.nan_to_num(fg)
+            for l in range(len(self._pq_lnames)):
+                m = self._pq_lmasks[l]
+                lab[i, l] = pn[m].max()
+                lforce[i, l] = fg[m].sum()
+        return lab, lforce
+
     def _pq_update(self, bin_right, stale, contact_idx=None, cont_right=None):
         if not hasattr(self, "_pq"):
             self._pq_hist = []
@@ -123,6 +159,9 @@ class PredTacObsMixin:
         npz = os.environ.get("PREDTAC_QUALITY_NPZ")
         if not npz and os.environ.get("PREDTAC_DUMP_DIR"):
             npz = os.path.join(os.environ["PREDTAC_DUMP_DIR"], "quality_raw.npz")
+        lab = lforce = None
+        if os.environ.get("PREDTAC_QUALITY_CONTACTS", "0") == "1" and contact_idx is None and cont_right is not None:
+            lab, lforce = self._pq_label_links()
         if npz and cont_right is not None:
             # raw per-tick arrays for offline calibration (threshold / link-order checks): predicted continuous + binary per link
             # vs GT per-sensor force norm, same tick; flushed every 100 updates
@@ -131,6 +170,9 @@ class PredTacObsMixin:
             self._pq_raw["cont"].append(np.asarray(cont_right, np.float32).copy())
             self._pq_raw["binary"].append(np.asarray(bin_right, np.float32).copy())
             self._pq_raw["force"].append(force_n.detach().cpu().numpy().astype(np.float32))
+            if lab is not None:
+                self._pq_raw.setdefault("label", []).append(lab.copy())
+                self._pq_raw.setdefault("lforce", []).append(lforce.copy())
             if len(self._pq_raw["cont"]) % 100 == 0:
                 os.makedirs(os.path.dirname(os.path.abspath(npz)), exist_ok=True)
                 np.savez(npz, **{k: np.stack(v) for k, v in self._pq_raw.items()})   # (ticks, N, 17|S)
@@ -148,6 +190,14 @@ class PredTacObsMixin:
         for k, g in enumerate(reversed(self._pq_hist)):
             q["pos"][k] += g.sum(); q["neg"][k] += (~g).sum()
             q["tp"][k] += (pred & g).sum(); q["fp"][k] += (pred & ~g).sum()
+        if lab is not None:
+            L = self.__dict__.setdefault("_pq_lab", dict(n=0, pos=0.0, tp=0.0, fp=0.0, neg=0.0, ta=0.0, la=0.0, both=0.0, xs=[], ys=[]))
+            pb = np.asarray(cont_right) > 0.1
+            lb = lab > 0.1
+            L["n"] += 1; L["pos"] += lb.sum(); L["neg"] += (~lb).sum(); L["tp"] += (pb & lb).sum(); L["fp"] += (pb & ~lb).sum()
+            ta = gt; la = (lforce.max(axis=1) > 0.01)
+            L["ta"] += ta.mean(); L["la"] += la.mean(); L["both"] += (ta & la).mean()
+            L["xs"].append(np.asarray(cont_right).ravel()); L["ys"].append(lab.ravel())
         if q["n"] % int(os.environ.get("PREDTAC_QUALITY_EVERY", "200")) == 0:
             tpr = q["tp"] / np.maximum(q["pos"], 1); fpr = q["fp"] / np.maximum(q["neg"], 1)
             # balanced agreement per lag: higher = prediction at t matches GT contact at t-k better
@@ -157,4 +207,13 @@ class PredTacObsMixin:
                   f"pred_pos={q['pr'] / q['n']:.3f} pred_links={q['npl'] / q['n']:.1f} gt_links={q['ngl'] / q['n']:.1f} | k=0 tpr={tpr[0]:.3f} fpr={fpr[0]:.3f} | best_lag={best} "
                   f"tpr={tpr[best]:.3f} fpr={fpr[best]:.3f} | bal@lag: " +
                   " ".join(f"{k}:{bal[k]:.2f}" for k in range(len(bal))), flush=True)
+            L = self.__dict__.get("_pq_lab")
+            if L is not None and L["n"] > 0:
+                x = np.concatenate(L["xs"]); y = np.concatenate(L["ys"])
+                c = float(np.corrcoef(x, y)[0, 1]) if x.std() > 0 and y.std() > 0 else float("nan")
+                print(f"[predtac][quality][label] n={L['n']} label_pos={L['pos'] / max(L['pos'] + L['neg'], 1):.3f} "
+                      f"link-tpr={L['tp'] / max(L['pos'], 1):.3f} link-fpr={L['fp'] / max(L['neg'], 1):.3f} corr(pred,label)={c:.3f} | "
+                      f"any-contact: force-tensor {L['ta'] / L['n']:.3f} vs contact-API {L['la'] / L['n']:.3f} (both {L['both'] / L['n']:.3f})",
+                      flush=True)
+                self._pq_lab = dict(n=0, pos=0.0, tp=0.0, fp=0.0, neg=0.0, ta=0.0, la=0.0, both=0.0, xs=[], ys=[])
             self._pq_reset()
