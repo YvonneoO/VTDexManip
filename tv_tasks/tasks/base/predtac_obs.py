@@ -258,10 +258,13 @@ class PredTacObsMixin:
             # raw per-tick arrays for offline calibration (threshold / link-order checks): predicted continuous + binary per link
             # vs GT per-sensor force norm, same tick; flushed every 100 updates
             if not hasattr(self, "_pq_raw"):
-                self._pq_raw = dict(cont=[], binary=[], force=[])
+                self._pq_raw = dict(cont=[], binary=[], force=[], req_tick=[], resp_ticks=[])
             self._pq_raw["cont"].append(np.asarray(cont_right, np.float32).copy())
             self._pq_raw["binary"].append(np.asarray(bin_right, np.float32).copy())
             self._pq_raw["force"].append(force_n.detach().cpu().numpy().astype(np.float32))
+            cl = getattr(self, "_predtac_client", None)               # which request each shard's response used (per-shard staleness)
+            self._pq_raw["req_tick"].append(np.int64((cl._tick - 1) if cl is not None else -1))
+            self._pq_raw["resp_ticks"].append(np.asarray(list(cl._shard_tick_seen) if cl is not None else [-1], np.int64))
             if lab is not None:
                 self._pq_raw.setdefault("label", []).append(lab.copy())
                 self._pq_raw.setdefault("lforce", []).append(lforce.copy())
