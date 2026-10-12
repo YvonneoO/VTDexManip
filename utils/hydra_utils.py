@@ -210,6 +210,8 @@ def get_args():
         args.sim_device = args.rl_device
         # args.sim_device = "cpu"
         # args.pipeline = "cpu"
+    if os.environ.get("VT_IDENTIFIER"):       # control arms of a warm start: same task and seed, separate run directory
+        args.identifier = os.environ["VT_IDENTIFIER"]
     print(f"Task: {args.task.split('-')[0]}")
     print(f"Identifier: {args.identifier}")
 
@@ -667,6 +669,8 @@ def get_args():
     # generic knobs for EVERY arm (P-only reruns that must leave intermediate checkpoints for a Pred-Tac warm start):
     #   VT_MAX_ITERATIONS: total iterations; PPO_SAVE_INTERVAL: model_<it>.pt every that many iterations; PREDTAC_EMB_DIM: encoder emb_dim of
     #   the T-encoder arms (a warm start from a P-only policy needs emb_dim >= the proprioception width, 338 for handover)
+    if os.environ.get("VT_NUM_ENVS"):         # P-only control arms must use the Pred-Tac arm's env count (not the config's 200)
+        args.task_envs["env"]["numEnvs"] = int(os.environ["VT_NUM_ENVS"])
     if os.environ.get("VT_MAX_ITERATIONS"):
         args.models["learn"]["max_iterations"] = int(os.environ["VT_MAX_ITERATIONS"])
     if os.environ.get("PPO_SAVE_INTERVAL"):
