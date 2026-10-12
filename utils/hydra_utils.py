@@ -664,6 +664,16 @@ def get_args():
         raise AttributeError(f"{args.task.split('-')[-1]} not define")
 
 
+    # generic knobs for EVERY arm (P-only reruns that must leave intermediate checkpoints for a Pred-Tac warm start):
+    #   VT_MAX_ITERATIONS: total iterations; PPO_SAVE_INTERVAL: model_<it>.pt every that many iterations; PREDTAC_EMB_DIM: encoder emb_dim of
+    #   the T-encoder arms (a warm start from a P-only policy needs emb_dim >= the proprioception width, 338 for handover)
+    if os.environ.get("VT_MAX_ITERATIONS"):
+        args.models["learn"]["max_iterations"] = int(os.environ["VT_MAX_ITERATIONS"])
+    if os.environ.get("PPO_SAVE_INTERVAL"):
+        args.models["learn"]["save_interval"] = int(os.environ["PPO_SAVE_INTERVAL"])
+    if os.environ.get("PREDTAC_EMB_DIM") and args.task.split("-")[-1] in ("predtac", "gtfmt"):
+        args.models["encoder"]["emb_dim"] = int(os.environ["PREDTAC_EMB_DIM"])
+
     if args.test:
         args.models['learn']['test'] = args.test
         args.task_envs["env"]["numEnvs"] = len(args.task_envs["env"]["env_dict"])
