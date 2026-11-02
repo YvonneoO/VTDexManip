@@ -37,7 +37,13 @@ def _layout(side, valid):
     # EgoTouch uses the same canonical chart mask for both sides (the two mapping JSONs
     # have identical row/column keys). Handedness is represented by mapping values, not
     # by horizontally mirroring the 21x21 output chart.
-    finger_cols = {"ff": 1, "mf": 5, "rf": 9, "lf": 13}
+    #
+    # Finger column order matches the human EgoTouch glove chart (part12_layout):
+    # little finger at cols 1-3, ring 5-7, middle 9-11, index (ff) 13-15, thumb 17-19 --
+    # i.e. the index finger sits next to the thumb, as on a real right hand. This order
+    # is kept identical to the human dataset so sim and human 21x21 grids are directly
+    # comparable cell-for-cell. Do NOT revert to index-at-cols-1 (that mirrors the hand).
+    finger_cols = {"ff": 13, "mf": 9, "rf": 5, "lf": 1}
     thumb_cols = range(17, 20)
 
     groups = {}
